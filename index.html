@@ -88,6 +88,14 @@ body{background:#0a0e1a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-s
 .drag-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,180,216,0.12);border:3px dashed #00b4d8;z-index:999;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#00b4d8;letter-spacing:2px}
 .drag-overlay.active{display:flex}
 </style>
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-DLTDQC3RTZ"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-DLTDQC3RTZ');
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
@@ -573,13 +581,16 @@ function teamNamesMatch(espnName, ourName){
   var a=espnName.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
   var b=ourName.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
   if(a===b) return true;
-  // Check if any word from our name appears in ESPN name or vice versa
+  // Exact substring match first
+  if(a.indexOf(b)>=0||b.indexOf(a)>=0) return true;
+  // Fuzzy word match — skip generic words that appear in many team names
+  var skip={state:1,university:1,north:1,south:1,east:1,west:1,point:1,tech:1,college:1,the:1,and:1,northern:1,southern:1,eastern:1,western:1,central:1,national:1,saint:1,mount:1};
   var aw=a.split(' ');var bw=b.split(' ');
   for(var i=0;i<aw.length;i++){
-    if(aw[i].length>3&&b.indexOf(aw[i])>=0) return true;
+    if(aw[i].length>3&&!skip[aw[i]]&&b.indexOf(aw[i])>=0) return true;
   }
   for(var i=0;i<bw.length;i++){
-    if(bw[i].length>3&&a.indexOf(bw[i])>=0) return true;
+    if(bw[i].length>3&&!skip[bw[i]]&&a.indexOf(bw[i])>=0) return true;
   }
   return false;
 }
@@ -720,118 +731,78 @@ function startScorePolling(){
 
 
 function shareStats(){
-  // Build a hidden off-screen div with bracket + stats combined
-  var rs=getRoundStats();
-  var ps=getParlayStats();
-  var totalSt=0,totalWi=0,totalLo=0,totalPL=0;
-  for(var i=0;i<straightBets.length;i++){
-    var b=straightBets[i];totalSt+=b.stake||0;
-    if(b.result==="win"){totalWi++;totalPL+=(b.potentialPayout||0)-(b.stake||0);}
-    if(b.result==="loss"){totalLo++;totalPL-=b.stake||0;}
-  }
-  var pps=getParlayStats();
-  totalSt+=pps.st;totalPL+=pps.pl;
-  var plC=totalPL>=0?"#10b981":"#ef4444";
-  var plT=(totalPL>=0?"+":"")+"$"+Math.abs(totalPL).toFixed(2);
-
-  // Build the bracket HTML (reuse existing bracket render)
-  var bracketHTML="";
+  // Switch to stats tab, screenshot it, switch back
   var savedTab=curTab;
-  curTab="bracket";
-  // We'll capture the existing bracket by temporarily switching tabs
-  // Instead, build a standalone snapshot div
-  var snap=document.createElement("div");
-  snap.style.cssText="position:fixed;left:-9999px;top:0;width:1200px;background:#0a0e1a;font-family:system-ui,-apple-system,sans-serif;padding:0;z-index:9999";
-
-  // Header strip
-  var hdr=document.createElement("div");
-  hdr.style.cssText="background:linear-gradient(135deg,#061a30,#0a0e1a);padding:14px 24px;border-bottom:2px solid #00b4d8";
-  hdr.innerHTML='<div style="font-size:18px;font-weight:900;color:#e2e8f0">March Madness 2026 Bet Tracker powered by <span style="color:#00b4d8">OddsJam.com</span></div>'
-    +'<div style="display:flex;gap:20px;margin-top:6px;font-size:12px">'
-    +'<span style="color:#64748b">Total Bets: <strong style="color:#e2e8f0">'+(straightBets.length+parlays.length)+'</strong></span>'
-    +'<span style="color:#64748b">Staked: <strong style="color:#e2e8f0">$'+totalSt.toFixed(2)+'</strong></span>'
-    +'<span style="color:#64748b">Record: <strong style="color:#e2e8f0">'+totalWi+'-'+totalLo+'</strong></span>'
-    +'<span style="color:#64748b">P&L: <strong style="color:'+plC+'">'+plT+'</strong></span>'
-    +'</div>';
-  snap.appendChild(hdr);
-
-  // Bracket section label
-  var blbl=document.createElement("div");
-  blbl.style.cssText="padding:8px 24px;background:#06162b;font-size:10px;font-weight:800;color:#00b4d8;letter-spacing:2px;border-bottom:1px solid #1c2640";
-  blbl.textContent="BRACKET";
-  snap.appendChild(blbl);
-
-  // Clone the current bracket scroll area
-  var bracketEl=document.querySelector(".bracket-scroll");
-  if(bracketEl){
-    var bClone=bracketEl.cloneNode(true);
-    bClone.style.cssText="overflow:visible;padding:12px 8px;background:#0a0e1a";
-    snap.appendChild(bClone);
-  }
-
-  // Stats section label
-  var slbl=document.createElement("div");
-  slbl.style.cssText="padding:8px 24px;background:#06162b;font-size:10px;font-weight:800;color:#00b4d8;letter-spacing:2px;border-bottom:1px solid #1c2640;margin-top:4px";
-  slbl.textContent="ROUND-BY-ROUND STATS";
-  snap.appendChild(slbl);
-
-  // Stats grid
-  var sgrid=document.createElement("div");
-  sgrid.style.cssText="display:flex;flex-wrap:wrap;gap:10px;padding:14px 24px;background:#0a0e1a";
-  var rounds=["R64","R32","S16","E8","F4","Championship"];
-  var rnames={"R64":"Round of 64","R32":"Round of 32","S16":"Sweet 16","E8":"Elite 8","F4":"Final Four","Championship":"Championship"};
-  for(var ri=0;ri<rounds.length;ri++){
-    var rk=rounds[ri];var rd=rs[rk];
-    if(!rd) continue;
-    var rplC=rd.pl>=0?"#10b981":"#ef4444";
-    var card=document.createElement("div");
-    card.style.cssText="background:#111827;border-radius:8px;padding:10px 14px;border-left:3px solid #00b4d8;min-width:160px;flex:1";
-    card.innerHTML='<div style="font-size:11px;font-weight:800;color:#00b4d8;margin-bottom:4px">'+rnames[rk]+'</div>'
-      +'<div style="font-size:18px;font-weight:900;color:'+rplC+'">'+(rd.pl>=0?"+":"")+'$'+Math.abs(rd.pl).toFixed(2)+'</div>'
-      +'<div style="font-size:10px;color:#64748b;margin-top:4px">'+rd.bets+' bets &bull; '+rd.wi+'-'+rd.lo+' &bull; $'+rd.st.toFixed(2)+' staked</div>';
-    sgrid.appendChild(card);
-  }
-  // Parlay card
-  var pcard=document.createElement("div");
-  pcard.style.cssText="background:#111827;border-radius:8px;padding:10px 14px;border-left:3px solid #f97316;min-width:160px;flex:1";
-  var pplC=pps.pl>=0?"#10b981":"#ef4444";
-  pcard.innerHTML='<div style="font-size:11px;font-weight:800;color:#f97316;margin-bottom:4px">Parlays</div>'
-    +'<div style="font-size:18px;font-weight:900;color:'+pplC+'">'+(pps.pl>=0?"+":"")+'$'+Math.abs(pps.pl).toFixed(2)+'</div>'
-    +'<div style="font-size:10px;color:#64748b;margin-top:4px">'+pps.total+' parlays &bull; '+pps.wi+'-'+pps.lo+' &bull; $'+pps.st.toFixed(2)+' staked</div>';
-  sgrid.appendChild(pcard);
-  snap.appendChild(sgrid);
-
-  // OddsJam footer
-  var ftr=document.createElement("div");
-  ftr.style.cssText="padding:10px 24px;background:#061a30;border-top:1px solid #1c2640;font-size:11px;color:#475569;text-align:center";
-  ftr.innerHTML='Find the sharpest bets and best odds all tournament at <span style="color:#00b4d8;font-weight:700">OddsJam.com</span>';
-  snap.appendChild(ftr);
-
-  document.body.appendChild(snap);
+  curTab="stats";
+  draw();
 
   var btn=document.getElementById("shareBtn");
   if(btn){btn.textContent="Generating...";btn.disabled=true;}
 
-  html2canvas(snap,{
-    backgroundColor:"#0a0e1a",
-    scale:2,
-    useCORS:true,
-    allowTaint:true,
-    width:1200,
-    windowWidth:1200
-  }).then(function(canvas){
-    document.body.removeChild(snap);
-    if(btn){btn.textContent="Share Stats";btn.disabled=false;}
-    var link=document.createElement("a");
-    link.download="march-madness-tracker-"+new Date().toISOString().slice(0,10)+".png";
-    link.href=canvas.toDataURL("image/png");
-    link.click();
-  }).catch(function(err){
-    document.body.removeChild(snap);
-    if(btn){btn.textContent="Share Stats";btn.disabled=false;}
-    console.error("Screenshot failed:",err);
-    alert("Screenshot failed — try again");
-  });
+  // Small delay to let the DOM render
+  setTimeout(function(){
+    var statsEl=document.querySelector(".lst");
+    if(!statsEl){
+      if(btn){btn.textContent="Share Stats";btn.disabled=false;}
+      curTab=savedTab;draw();
+      return;
+    }
+
+    // Build a wrapper with header + stats content
+    var wrapper=document.createElement("div");
+    wrapper.style.cssText="position:fixed;left:-9999px;top:0;width:700px;background:#0a0e1a;font-family:system-ui,-apple-system,sans-serif;z-index:9999;padding-bottom:16px";
+
+    // Header
+    var hdr=document.createElement("div");
+    hdr.style.cssText="background:linear-gradient(135deg,#061a30,#0a0e1a);padding:14px 24px;border-bottom:2px solid #00b4d8";
+    var totalSt=0,totalWi=0,totalLo=0,totalPL=0;
+    for(var i=0;i<straightBets.length;i++){var b=straightBets[i];totalSt+=b.stake||0;if(b.result==="win"){totalWi++;totalPL+=(b.potentialPayout||0)-(b.stake||0);}if(b.result==="loss"){totalLo++;totalPL-=b.stake||0;}}
+    var ps=getParlayStats();totalSt+=ps.st;totalPL+=ps.pl;
+    var plC=totalPL>=0?"#10b981":"#ef4444";
+    var plT=(totalPL>=0?"+":"")+"$"+Math.abs(totalPL).toFixed(2);
+    hdr.innerHTML='<div style="font-size:16px;font-weight:900;color:#e2e8f0">March Madness 2026 Bet Tracker powered by <span style="color:#00b4d8">OddsJam.com</span></div>'
+      +'<div style="display:flex;gap:20px;margin-top:6px;font-size:12px">'
+      +'<span style="color:#64748b">Bets: <strong style="color:#e2e8f0">'+(straightBets.length+parlays.length)+'</strong></span>'
+      +'<span style="color:#64748b">Staked: <strong style="color:#e2e8f0">$'+totalSt.toFixed(2)+'</strong></span>'
+      +'<span style="color:#64748b">Record: <strong style="color:#e2e8f0">'+totalWi+'-'+totalLo+'</strong></span>'
+      +'<span style="color:#64748b">P&L: <strong style="color:'+plC+'">'+plT+'</strong></span>'
+      +'</div>';
+    wrapper.appendChild(hdr);
+
+    // Clone the stats list
+    var clone=statsEl.cloneNode(true);
+    clone.style.cssText="padding:16px 20px;background:#0a0e1a";
+    wrapper.appendChild(clone);
+
+    // Footer
+    var ftr=document.createElement("div");
+    ftr.style.cssText="padding:10px 24px;background:#061a30;border-top:1px solid #1c2640;font-size:11px;color:#475569;text-align:center";
+    ftr.innerHTML='Find the sharpest bets and best odds all tournament at <span style="color:#00b4d8;font-weight:700">OddsJam.com</span>';
+    wrapper.appendChild(ftr);
+
+    document.body.appendChild(wrapper);
+
+    html2canvas(wrapper,{
+      backgroundColor:"#0a0e1a",
+      scale:2,
+      useCORS:true,
+      width:700,
+      windowWidth:700
+    }).then(function(canvas){
+      document.body.removeChild(wrapper);
+      curTab=savedTab;draw();
+      if(btn){btn.textContent="Share Stats";btn.disabled=false;}
+      var link=document.createElement("a");
+      link.download="march-madness-stats-"+new Date().toISOString().slice(0,10)+".png";
+      link.href=canvas.toDataURL("image/png");
+      link.click();
+    }).catch(function(err){
+      document.body.removeChild(wrapper);
+      curTab=savedTab;draw();
+      if(btn){btn.textContent="Share Stats";btn.disabled=false;}
+      console.error("Screenshot failed:",err);
+    });
+  },150);
 }
 
 function draw(){
