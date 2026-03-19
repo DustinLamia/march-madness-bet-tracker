@@ -107,6 +107,9 @@ Rules:
 - If there are no straight bets, return "bets": []
 - For prediction market slips (Kalshi, Polymarket): extract team/outcome as "team", convert probability prices to American odds (65 cents = +54, 80 cents = -400), set betType to "Prediction Market". Stake is amount spent, potentialPayout is max payout.
 - If a prediction market bet has no specific team, set team to the outcome description.
+- Bet types to recognize: "Moneyline", "Spread -3.5", "Over 162", "Under 169.5", "1st Half Moneyline", "1st Half Spread -3.5", "1st Half Over 82", "Player Prop — Points Over 18.5", "Player Prop — Assists Over 4.5". Use these exact formats.
+- For 1st half bets, prefix betType with "1st Half " (e.g. "1st Half Over 82.5")
+- For player props, prefix betType with "Player Prop — " and include the stat and line (e.g. "Player Prop — Points Over 18.5"). Set team to the player name.
 - CRITICAL payout rule: potentialPayout ALWAYS equals stake + profit. If a slip shows "To Win: 48.08" and "Stake: 50.00" then potentialPayout = 98.08, NOT 48.08 and NOT 1.92. Always add stake + to-win amount.
 - Known sportsbooks: DraftKings, FanDuel, BetMGM, Caesars, ESPN Bet, PointsBet, BetRivers, WynnBet, Barstool, ProphetX, Hard Rock, Fanatics. Extract sportsbook name if visible.
 - Return JSON only. No explanation, no markdown, no backticks.`;

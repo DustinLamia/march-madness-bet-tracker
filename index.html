@@ -85,6 +85,11 @@ body{background:#0a0e1a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-s
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 .auto-grade-bar{padding:5px 20px;background:#064e3b;border-bottom:1px solid #10b981;font-size:10px;color:#10b981;display:flex;align-items:center;gap:6px}
 #fi{display:none}
+.modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:500;display:flex;align-items:center;justify-content:center}
+.modal-box{background:#111827;border:1px solid #1c2640;border-radius:12px;padding:20px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto}
+.modal-box h3{font-size:14px;font-weight:800;color:#00b4d8;margin-bottom:12px;letter-spacing:1px}
+.modal-bet{background:#0a0e1a;border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid #00b4d8}
+.modal-close{float:right;background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;margin-top:-4px}
 .drag-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,180,216,0.12);border:3px dashed #00b4d8;z-index:999;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#00b4d8;letter-spacing:2px}
 .drag-overlay.active{display:flex}
 </style>
@@ -182,6 +187,27 @@ var isParsing=false;
 var gameResults={};   // gid -> {isFinal, winner, score, isLive, statusText}
 var bracketWinners={}; // gid -> winning team name
 var lastScoreFetch=0;
+var activeGameModal=null;
+
+function showGameModal(gid){
+  activeGameModal=gid;
+  draw();
+}
+
+function closeModal(){
+  activeGameModal=null;
+  draw();
+}
+
+function isFirstHalfBet(b){
+  var bt=(b.betType||"").toLowerCase();
+  return bt.indexOf("1st half")>=0||bt.indexOf("first half")>=0||bt.indexOf("1h ")>=0||bt.indexOf("h1")>=0;
+}
+
+function isPropBet(b){
+  var bt=(b.betType||"").toLowerCase();
+  return bt.indexOf("prop")>=0||bt.indexOf("points")>=0||bt.indexOf("assists")>=0||bt.indexOf("rebounds")>=0||bt.indexOf("threes")>=0||bt.indexOf("blocks")>=0||bt.indexOf("steals")>=0;
+}
 var espnScheduled={};  // key = "teamA_teamB" or espn event id -> {tm,tv,d,isFinal,isLive,winner,homeScore,awayScore}
 var scoreFetchInterval=null;
 
@@ -306,10 +332,17 @@ function gameCard(g){
     if(!teamNamesMatch(gr.winner,g.t1)) t1disp='<span style="opacity:0.38;text-decoration:line-through">'+g.t1+'</span>';
     if(!teamNamesMatch(gr.winner,g.t2)) t2disp='<span style="opacity:0.38;text-decoration:line-through">'+g.t2+'</span>';
   }
-  return '<div class="'+cls+'">'
+  // Build pending bet summary for this game
+  var pendingStrip="";
+  for(var pi=0;pi<betsForGame.length;pi++){
+    var pb=betsForGame[pi];
+    var pcolor=pb.result==="win"?"#10b981":pb.result==="loss"?"#ef4444":pb.result==="push"?"#f59e0b":"#94a3b8";
+    pendingStrip+='<div style="font-size:9px;padding:2px 8px;color:'+pcolor+';border-top:1px solid #1c2640">'+(pb.betType||pb.team||"Bet")+' $'+(pb.stake||0).toFixed(0)+(pb.result?' — '+pb.result.toUpperCase():' — Pending')+"</div>";
+  }
+  return '<div class="'+cls+'" onclick="showGameModal(\"'+g.id+'\")' +' style="cursor:pointer">'
     +'<div class="tr"><span class="sd">('+g.s1+')</span><span class="tn'+(info.hasBet?" bt":"")+'">'+t1disp+plBadge+'</span>'+statusBadge+scoreStr+'</div>'
     +'<div class="tr"><span class="sd">('+g.s2+')</span><span class="tn">'+t2disp+'</span><span class="tm-t">'+g.d+' '+g.tm+' '+g.tv+'</span></div>'
-    +badge+'</div>';
+    +pendingStrip+badge+'</div>';
 }
 
 function slot(label){return '<div class="sl">'+label+'</div>';}
@@ -925,12 +958,27 @@ function draw(){
           var gradedBy=b.autoGraded?'<span style="font-size:9px;color:#047857;margin-left:6px">AUTO-GRADED</span>':'';
           btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-weight:700;font-size:14px;color:'+xc+'">'+(bp>=0?"+":"")+'$'+Math.abs(bp).toFixed(2)+gradedBy+'</span></div>';
         }
-        h+='<div class="bi" style="border-left-color:'+(g?g.rc:"#00b4d8")+'">';
-        h+='<div style="display:flex;justify-content:space-between;align-items:center">';
-        h+='<div><span style="font-weight:700;font-size:14px;color:#fbbf24">'+(b.team||"?")+'</span>';
-        h+='<span style="color:#64748b;font-size:11px;margin-left:6px">'+(b.betType||"")+'</span>';
-        if(g&&g.rn) h+='<span style="font-size:9px;color:'+g.rc+';margin-left:6px">['+g.rn+(g.round?" "+g.round:"")+']</span>';
-        h+='</div><div style="font-weight:700">$'+(b.stake||0).toFixed(2)+' @ '+(b.odds||"?")+'</div></div>';
+        h+='<div class="bi" style="border-left-color:'+(g?g.rc:"#00b4d8")+'">'
+        h+='<div style="display:flex;justify-content:space-between;align-items:flex-start">'
+        h+='<div>'
+        var betTitle=(function(){
+          var bt=b.betType||"";
+          var tm=b.team||"";
+          var btL=bt.toLowerCase();
+          // Totals: show as-is (e.g. "Under 169.5")
+          if(btL.indexOf("over")>=0||btL.indexOf("under")>=0||btL.indexOf("total")>=0) return bt||tm;
+          // Moneyline/Spread: prefix with team name if not already in betType
+          if(tm&&bt&&bt.toLowerCase().indexOf(tm.toLowerCase())<0) return tm+" — "+bt;
+          return bt||tm||"?";
+        })();
+        h+='<div style="font-weight:800;font-size:14px;color:#fbbf24">'+betTitle+'</div>'
+        h+='<div style="font-size:11px;color:#94a3b8;margin-top:3px">'+(b.team||"")
+          +(g&&g.t1?' <span style="color:#475569">('+g.t1+' vs '+g.t2+')</span>':"")+'</div>'
+        h+='</div>'
+        h+='<div style="text-align:right">'
+        h+='<div style="font-weight:700;font-size:13px">$'+(b.stake||0).toFixed(2)+' @ '+(b.odds||"?")+'</div>'
+        if(g&&g.rn) h+='<div style="font-size:9px;color:'+g.rc+';margin-top:2px">'+g.rn+' '+( g.round||"")+'</div>'
+        h+='</div></div>'
         h+=btns+'</div>';
       }
     }
@@ -1008,6 +1056,59 @@ function draw(){
     h+='<span><span style="color:#64748b">Staked: </span><span style="font-weight:700">$'+ps2.st.toFixed(2)+'</span></span>';
     h+='</div></div>';
     h+='</div>';
+  }
+
+  // Game modal
+  if(activeGameModal){
+    var mg=null;for(var i=0;i<flat.length;i++){if(flat[i].id===activeGameModal){mg=flat[i];break;}}
+    var mgBets=[];for(var i=0;i<straightBets.length;i++){if(straightBets[i].assignedGame===activeGameModal)mgBets.push(straightBets[i]);}
+    var gr=gameResults[activeGameModal];
+    h+='<div class="modal-overlay" onclick="closeModal()">';
+    h+='<div class="modal-box" onclick="event.stopPropagation()">';
+    h+='<button class="modal-close" onclick="closeModal()">x</button>';
+    if(mg&&mg.t1){
+      h+='<h3>'+(mg.t1||"")+(mg.s1?"  ("+mg.s1+")":"")+' vs '+(mg.t2||"")+(mg.s2?" ("+mg.s2+")":"")+'</h3>';
+    }else{
+      h+='<h3>Game Bets</h3>';
+    }
+    if(gr){
+      var sc=gr.isFinal?'<span class="gm-final">FINAL</span>':gr.isLive?'<span class="gm-live">LIVE</span>':'';
+      if(gr.homeScore||gr.awayScore) h+='<div style="font-size:12px;color:#94a3b8;margin-bottom:10px">'+sc+' '+gr.awayTeam+' '+gr.awayScore+' - '+gr.homeScore+' '+gr.homeTeam+'</div>';
+    }
+    if(!mgBets.length){
+      h+='<div style="text-align:center;padding:20px;color:#475569;font-size:13px">No bets on this game</div>';
+    }else{
+      for(var i=0;i<mgBets.length;i++){
+        var mb=mgBets[i];
+        var mbp=mb.result==="win"?((mb.potentialPayout||0)-(mb.stake||0)):mb.result==="loss"?-(mb.stake||0):null;
+        var mbc=mb.result==="win"?"#10b981":mb.result==="loss"?"#ef4444":mb.result==="push"?"#f59e0b":"#94a3b8";
+        var isHalf=isFirstHalfBet(mb);var isProp=isPropBet(mb);
+        var tag=isHalf?'<span style="font-size:9px;background:#1e3a5f;color:#60a5fa;padding:1px 5px;border-radius:3px;margin-left:4px">1H</span>':isProp?'<span style="font-size:9px;background:#3b1f5f;color:#c084fc;padding:1px 5px;border-radius:3px;margin-left:4px">PROP</span>':'';
+        var needsManual=(isHalf||isProp)&&!mb.result;
+        h+='<div class="modal-bet" style="border-left-color:'+mbc+'">';
+        h+='<div style="display:flex;justify-content:space-between;align-items:center">';
+        h+='<div><span style="font-weight:700;color:#fbbf24;font-size:13px">'+(mb.betType||mb.team||"?")+tag+'</span>';
+        if(mb.team) h+='<div style="font-size:10px;color:#64748b;margin-top:2px">'+mb.team+'</div>';
+        h+='</div>';
+        h+='<div style="text-align:right"><div style="font-weight:700;font-size:12px">$'+(mb.stake||0).toFixed(2)+' @ '+(mb.odds||"?")+'</div>';
+        if(mbp!==null) h+='<div style="font-weight:700;color:'+mbc+';font-size:12px">'+(mbp>=0?"+":"")+"$"+Math.abs(mbp).toFixed(2)+'</div>';
+        h+='</div></div>';
+        if(needsManual){
+          h+='<div style="font-size:10px;color:#475569;margin-top:6px;margin-bottom:4px">Grade manually:</div>';
+          h+='<div style="display:flex;gap:5px">';
+          h+='<button class="rbt" data-r="win" data-b="'+mb.id+'" data-type="straight" style="background:#10b981">WIN</button>';
+          h+='<button class="rbt" data-r="loss" data-b="'+mb.id+'" data-type="straight" style="background:#ef4444">LOSS</button>';
+          h+='<button class="rbt" data-r="push" data-b="'+mb.id+'" data-type="straight" style="background:#f59e0b">PUSH</button>';
+          h+='</div>';
+        }else if(mb.result){
+          h+='<div style="font-size:10px;color:'+mbc+';margin-top:4px;font-weight:700">'+mb.result.toUpperCase()+(mb.autoGraded?' — Auto-graded':'')+' <button class="rbt" data-r="undo" data-b="'+mb.id+'" data-type="straight" style="background:#1e293b;flex:0;padding:2px 8px;font-size:9px">Undo</button></div>';
+        }else{
+          h+='<div style="font-size:10px;color:#475569;margin-top:4px">Pending — auto-grades when final</div>';
+        }
+        h+='</div>';
+      }
+    }
+    h+='</div></div>';
   }
 
   h+='</div>';
