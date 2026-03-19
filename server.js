@@ -11,6 +11,53 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'March Madness Bet Tracker API' });
 });
 
+// ESPN scores route — polls NCAA tournament scoreboard
+app.get('/api/scores', async (req, res) => {
+  try {
+    const url = 'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=100&limit=64';
+    const response = await fetch(url);
+    const data = await response.json();
+
+    const games = (data.events || []).map(event => {
+      const comp = event.competitions[0];
+      const status = comp.status;
+      const teams = comp.competitors;
+      const home = teams.find(t => t.homeAway === 'home');
+      const away = teams.find(t => t.homeAway === 'away');
+      const isFinal = status.type.completed;
+      const isLive = status.type.state === 'in';
+
+      let winner = null;
+      if (isFinal) {
+        winner = parseInt(home.score) > parseInt(away.score) ? home.team.displayName : away.team.displayName;
+      }
+
+      return {
+        espnId: event.id,
+        name: event.name,
+        shortName: event.shortName,
+        homeTeam: home ? home.team.displayName : '',
+        homeScore: home ? home.score : '',
+        awayTeam: away ? away.team.displayName : '',
+        awayScore: away ? away.score : '',
+        isFinal,
+        isLive,
+        statusText: status.type.shortDetail || status.type.description,
+        winner,
+        round: (event.competitions[0].notes || []).length > 0
+          ? event.competitions[0].notes[0].headline
+          : ''
+      };
+    });
+
+    res.json({ games });
+  } catch (err) {
+    console.error('ESPN fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch scores from ESPN' });
+  }
+});
+
+// Parse bet slip via Anthropic
 app.post('/api/parse-slip', async (req, res) => {
   const { image, mediaType } = req.body;
 
@@ -75,25 +122,15 @@ Rules:
         messages: [{
           role: 'user',
           content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: mediaType, data: image }
-            },
-            {
-              type: 'text',
-              text: 'Parse all bets and parlays from this screenshot. Return the JSON object only.'
-            }
+            { type: 'image', source: { type: 'base64', media_type: mediaType, data: image } },
+            { type: 'text', text: 'Parse all bets and parlays from this screenshot. Return the JSON object only.' }
           ]
         }]
       })
     });
 
     const data = await response.json();
-
-    if (data.error) {
-      return res.status(400).json({ error: data.error.message });
-    }
-
+    if (data.error) return res.status(400).json({ error: data.error.message });
     res.json(data);
   } catch (err) {
     console.error('Anthropic API error:', err);
