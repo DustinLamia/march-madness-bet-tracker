@@ -105,6 +105,10 @@ Rules:
 - A parlay has multiple legs and a combined payout. A straight bet is a single game.
 - If there are no parlays, return "parlays": []
 - If there are no straight bets, return "bets": []
+- For prediction market slips (Kalshi, Polymarket): extract team/outcome as "team", convert probability prices to American odds (65 cents = +54, 80 cents = -400), set betType to "Prediction Market". Stake is amount spent, potentialPayout is max payout.
+- If a prediction market bet has no specific team, set team to the outcome description.
+- CRITICAL payout rule: potentialPayout ALWAYS equals stake + profit. If a slip shows "To Win: 48.08" and "Stake: 50.00" then potentialPayout = 98.08, NOT 48.08 and NOT 1.92. Always add stake + to-win amount.
+- Known sportsbooks: DraftKings, FanDuel, BetMGM, Caesars, ESPN Bet, PointsBet, BetRivers, WynnBet, Barstool, ProphetX, Hard Rock, Fanatics. Extract sportsbook name if visible.
 - Return JSON only. No explanation, no markdown, no backticks.`;
 
   try {

@@ -85,10 +85,14 @@ body{background:#0a0e1a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-s
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 .auto-grade-bar{padding:5px 20px;background:#064e3b;border-bottom:1px solid #10b981;font-size:10px;color:#10b981;display:flex;align-items:center;gap:6px}
 #fi{display:none}
+.drag-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,180,216,0.12);border:3px dashed #00b4d8;z-index:999;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#00b4d8;letter-spacing:2px}
+.drag-overlay.active{display:flex}
 </style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 </head>
 <body>
 <div id="app"></div>
+<div class="drag-overlay" id="dragOverlay">Drop bet slips anywhere</div>
 <input type="file" id="fi" accept="image/*" multiple>
 <script>
 // ===== CHANGE THIS to your Render URL after deploying =====
@@ -170,7 +174,32 @@ var isParsing=false;
 var gameResults={};   // gid -> {isFinal, winner, score, isLive, statusText}
 var bracketWinners={}; // gid -> winning team name
 var lastScoreFetch=0;
+var espnScheduled={};  // key = "teamA_teamB" or espn event id -> {tm,tv,d,isFinal,isLive,winner,homeScore,awayScore}
 var scoreFetchInterval=null;
+
+function saveToStorage(){
+  try{
+    localStorage.setItem('mmbt_straight',JSON.stringify(straightBets));
+    localStorage.setItem('mmbt_parlays',JSON.stringify(parlays));
+  }catch(e){console.warn('Save failed:',e);}
+}
+
+function loadFromStorage(){
+  try{
+    var s=localStorage.getItem('mmbt_straight');
+    var p=localStorage.getItem('mmbt_parlays');
+    if(s) straightBets=JSON.parse(s);
+    if(p) parlays=JSON.parse(p);
+  }catch(e){console.warn('Load failed:',e);}
+}
+
+function clearStorage(){
+  if(!confirm('Clear all your bets? This cannot be undone.')) return;
+  localStorage.removeItem('mmbt_straight');
+  localStorage.removeItem('mmbt_parlays');
+  straightBets=[];parlays=[];autoGradeLog=[];
+  draw();
+}
 
 function splitWords(str){
   var res=[],w="";
@@ -269,11 +298,59 @@ function gameCard(g){
   }
   return '<div class="'+cls+'">'
     +'<div class="tr"><span class="sd">('+g.s1+')</span><span class="tn'+(info.hasBet?" bt":"")+'">'+t1disp+plBadge+'</span>'+statusBadge+scoreStr+'</div>'
-    +'<div class="tr"><span class="sd">('+g.s2+')</span><span class="tn">'+t2disp+'</span><span class="tm-t">'+g.tm+' '+g.tv+'</span></div>'
+    +'<div class="tr"><span class="sd">('+g.s2+')</span><span class="tn">'+t2disp+'</span><span class="tm-t">'+g.d+' '+g.tm+' '+g.tv+'</span></div>'
     +badge+'</div>';
 }
 
 function slot(label){return '<div class="sl">'+label+'</div>';}
+
+// Build a live bracket slot from winners data
+// g1id, g2id = the two feeder game IDs
+// round = display label e.g. "Round of 32"
+// espnGame = optional ESPN scheduled game object for this slot
+function liveSlot(g1id, g2id, round, espnScheduled){
+  var w1=bracketWinners[g1id]||null;
+  var w2=bracketWinners[g2id]||null;
+
+  // If neither team known yet, show placeholder
+  if(!w1&&!w2) return '<div class="sl">'+round+'</div>';
+
+  // Get result info for this matchup from ESPN if available
+  var gr=null;
+  if(espnScheduled) gr=espnScheduled;
+
+  var hasGame=w1&&w2;
+  var cls="gm";
+  var t1=w1||'TBD';
+  var t2=w2||'TBD';
+
+  // Check if this slot itself has a bet
+  // Find the flat entry for this live slot if it exists
+  var slotId=g1id+'_'+g2id;
+  var info=getGamePL(slotId);
+  if(info.hasBet) cls="gm hb";
+
+  var timeInfo='';
+  if(gr&&gr.tm){
+    timeInfo='<span class="tm-t">'+gr.d+' '+gr.tm+' '+gr.tv+'</span>';
+  }else if(hasGame){
+    timeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
+  }
+
+  var statusBadge='';
+  if(gr&&gr.isFinal) statusBadge='<span class="gm-final">FINAL</span>';
+  else if(gr&&gr.isLive) statusBadge='<span class="gm-live">LIVE</span>';
+
+  var t1strike=gr&&gr.isFinal&&gr.winner&&!teamNamesMatch(gr.winner,t1);
+  var t2strike=gr&&gr.isFinal&&gr.winner&&!teamNamesMatch(gr.winner,t2);
+  var t1disp=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
+  var t2disp=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
+
+  return '<div class="'+cls+'">'
+    +'<div class="tr"><span class="tn'+(w1?' bt':'')+'">'+t1disp+'</span>'+statusBadge+'</div>'
+    +'<div class="tr"><span class="tn" style="color:'+(w2?'#e2e8f0':'#334155')+'">'+t2disp+'</span>'+timeInfo+'</div>'
+    +'</div>';
+}
 
 function connSvg(rev){
   var h='<div class="cn"><svg viewBox="0 0 28 100" preserveAspectRatio="none">';
@@ -293,12 +370,194 @@ function connSvg(rev){
 
 function rndWrap(inner){return '<div class="rnd">'+inner+'</div>';}
 
+function getRegionE8Winner(reg){
+  // Walk the winner chain: R64 -> R32 -> S16 -> E8
+  var g=reg.g;
+  // R32 winners (4 slots, each from 2 R64 games)
+  var r32w=[];
+  for(var i=0;i<4;i++){
+    var a=bracketWinners[g[i*2].id];
+    var b=bracketWinners[g[i*2+1].id];
+    if(a&&b){var eg=findEspnScheduled(a,b);r32w.push(eg&&eg.winner?eg.winner:null);}
+    else r32w.push(null);
+  }
+  // S16 winners (2 slots, each from 2 R32 winners)
+  var s16w=[];
+  for(var i=0;i<2;i++){
+    var a=r32w[i*2];var b=r32w[i*2+1];
+    if(a&&b){var eg=findEspnScheduled(a,b);s16w.push(eg&&eg.winner?eg.winner:null);}
+    else s16w.push(null);
+  }
+  // E8 winner (1 slot from 2 S16 winners)
+  if(s16w[0]&&s16w[1]){var eg=findEspnScheduled(s16w[0],s16w[1]);return eg&&eg.winner?eg.winner:null;}
+  return null;
+}
+
+function buildCenterColumn(){
+  // Get E8 winners for each region
+  var e8E=getRegionE8Winner(E);
+  var e8S=getRegionE8Winner(S);
+  var e8W=getRegionE8Winner(W);
+  var e8M=getRegionE8Winner(M);
+
+  // Final Four top: East vs South
+  var ff1t1=e8E||'TBD';var ff1t2=e8S||'TBD';
+  var ff1sched=e8E&&e8S?findEspnScheduled(e8E,e8S):null;
+  var ff1winner=ff1sched&&ff1sched.winner?ff1sched.winner:null;
+
+  // Final Four bottom: West vs Midwest
+  var ff2t1=e8W||'TBD';var ff2t2=e8M||'TBD';
+  var ff2sched=e8W&&e8M?findEspnScheduled(e8W,e8M):null;
+  var ff2winner=ff2sched&&ff2sched.winner?ff2sched.winner:null;
+
+  // Championship
+  var ct1=ff1winner||'TBD';var ct2=ff2winner||'TBD';
+  var csched=ff1winner&&ff2winner?findEspnScheduled(ff1winner,ff2winner):null;
+  var champion=csched&&csched.winner?csched.winner:null;
+
+  function liveBox(t1,t2,label,color,sched,borderColor){
+    var hasTeams=(t1!='TBD'||t2!='TBD');
+    var badge='';var timeInfo='';
+    if(sched&&sched.isFinal) badge='<span class="gm-final">FINAL</span>';
+    else if(sched&&sched.isLive) badge='<span class="gm-live">LIVE</span>';
+    if(sched&&sched.tm) timeInfo='<span class="tm-t" style="display:block;margin-top:4px">'+sched.d+' '+sched.tm+'</span>';
+    else if(hasTeams&&t1!='TBD'&&t2!='TBD') timeInfo='<span style="font-size:9px;color:#475569;display:block;margin-top:4px">Time TBD</span>';
+
+    if(!hasTeams||(!e8E&&!e8S&&label.indexOf('East')>=0)||(!e8W&&!e8M&&label.indexOf('West')>=0)){
+      return '<div class="f4" style="border-color:'+borderColor+';color:'+borderColor+'">FINAL FOUR<br>'
+        +'<span style="font-size:9px;color:#475569;font-weight:400;display:block;margin-top:2px">'+label+'</span>'
+        +'<span style="font-size:10px;font-weight:400;color:#94a3b8;display:block;margin-top:4px">TBD</span></div>';
+    }
+    var t1strike=sched&&sched.isFinal&&sched.winner&&!teamNamesMatch(sched.winner,t1);
+    var t2strike=sched&&sched.isFinal&&sched.winner&&!teamNamesMatch(sched.winner,t2);
+    return '<div class="f4" style="border-color:'+borderColor+';text-align:left;padding:10px 14px">'
+      +'<div style="font-size:9px;font-weight:800;color:'+borderColor+';letter-spacing:1px;margin-bottom:6px">FINAL FOUR &mdash; '+label+'</div>'
+      +'<div style="font-size:13px;font-weight:700;color:#fbbf24;padding:3px 0'+(t1strike?';opacity:0.38;text-decoration:line-through':'')+'">'+t1+'</div>'
+      +'<div style="font-size:13px;font-weight:700;color:'+(t2!='TBD'?'#e2e8f0':'#334155')+';padding:3px 0'+(t2strike?';opacity:0.38;text-decoration:line-through':'')+' ">'+t2+'</div>'
+      +badge+timeInfo+'</div>';
+  }
+
+  var h='<div class="ctr">';
+
+  // FF Top (East/South)
+  h+=liveBox(ff1t1,ff1t2,'East / South','#3b82f6',ff1sched,'#3b82f6');
+
+  // Championship
+  if(!ff1winner&&!ff2winner){
+    h+='<div class="ch">CHAMPION<br><span style="font-size:11px;font-weight:400;color:#64748b;display:block;margin-top:4px">TBD</span></div>';
+  }else if(champion){
+    h+='<div class="ch" style="border-color:#fbbf24;background:#0a1205">'
+      +'<div style="font-size:10px;color:#00b4d8;letter-spacing:2px;margin-bottom:6px">CHAMPION</div>'
+      +'<div style="font-size:20px;font-weight:900;color:#fbbf24">'+champion+'</div>'
+      +'</div>';
+  }else{
+    var cs1=ff1winner||'TBD';var cs2=ff2winner||'TBD';
+    var cs1strike=csched&&csched.isFinal&&!teamNamesMatch(csched.winner||'',cs1);
+    var cs2strike=csched&&csched.isFinal&&!teamNamesMatch(csched.winner||'',cs2);
+    var ctimeInfo=csched&&csched.tm?'<span class="tm-t" style="display:block;margin-top:4px">'+csched.d+' '+csched.tm+'</span>':
+      (cs1!='TBD'&&cs2!='TBD'?'<span style="font-size:9px;color:#475569;display:block;margin-top:4px">Time TBD</span>':'');
+    var cbadge=csched&&csched.isFinal?'<span class="gm-final">FINAL</span>':csched&&csched.isLive?'<span class="gm-live">LIVE</span>':'';
+    h+='<div class="ch" style="text-align:left;padding:12px 16px">'
+      +'<div style="font-size:10px;color:#00b4d8;letter-spacing:2px;margin-bottom:6px">CHAMPIONSHIP</div>'
+      +'<div style="font-size:16px;font-weight:900;color:#fbbf24;padding:3px 0'+(cs1strike?';opacity:0.38;text-decoration:line-through':'')+'">'+cs1+'</div>'
+      +'<div style="font-size:16px;font-weight:900;color:'+(cs2!='TBD'?'#e2e8f0':'#334155')+';padding:3px 0'+(cs2strike?';opacity:0.38;text-decoration:line-through':'')+' ">'+cs2+'</div>'
+      +cbadge+ctimeInfo+'</div>';
+  }
+
+  // FF Bottom (West/Midwest)
+  h+=liveBox(ff2t1,ff2t2,'West / Midwest','#ef4444',ff2sched,'#ef4444');
+
+  h+='</div>';
+  return h;
+}
+
+function findEspnScheduled(t1,t2){
+  // Look up a scheduled later-round game by team names
+  for(var k in espnScheduled){
+    var eg=espnScheduled[k];
+    if(!eg.homeTeam||!eg.awayTeam) continue;
+    if((teamNamesMatch(eg.homeTeam,t1)||teamNamesMatch(eg.awayTeam,t1))&&
+       (teamNamesMatch(eg.homeTeam,t2)||teamNamesMatch(eg.awayTeam,t2))) return eg;
+  }
+  return null;
+}
+
 function buildRegion(reg,rev){
   var r1="",r2="",r3="",r4="",c1="",c2="",c3="";
-  for(var i=0;i<8;i++) r1+=gameCard(reg.g[i]);
-  for(var i=0;i<4;i++){r2+=slot("Round of 32");c1+=connSvg(rev);}
-  for(var i=0;i<2;i++){r3+=slot("Sweet 16");c2+=connSvg(rev);}
-  r4=slot("Elite 8");c3=connSvg(rev);
+  var g=reg.g;
+
+  // R64 — 8 games
+  for(var i=0;i<8;i++) r1+=gameCard(g[i]);
+
+  // R32 — 4 slots, each fed by 2 R64 games
+  // Pairs: (0,1), (2,3), (4,5), (6,7)
+  for(var i=0;i<4;i++){
+    var w1=bracketWinners[g[i*2].id]||null;
+    var w2=bracketWinners[g[i*2+1].id]||null;
+    var sched=w1&&w2?findEspnScheduled(w1,w2):null;
+    r2+=liveSlot(g[i*2].id,g[i*2+1].id,'Round of 32',sched);
+    c1+=connSvg(rev);
+  }
+
+  // Sweet 16 — 2 slots, each fed by 2 R32 winners
+  // R32 winner pairs: (games 0-1 winner vs games 2-3 winner), (games 4-5 winner vs games 6-7 winner)
+  var r32w=[];
+  for(var i=0;i<4;i++) r32w.push(bracketWinners[g[i*2].id+'_r32_'+i]||bracketWinners['r32_'+reg.n+'_'+i]||null);
+  // For S16, derive from R32 slots — use the R32 bracket winners if available
+  // We track by the pair of R64 game IDs that feed each R32 slot
+  var r32pairs=[[g[0].id,g[1].id],[g[2].id,g[3].id],[g[4].id,g[5].id],[g[6].id,g[7].id]];
+  var r32winners=[];
+  for(var i=0;i<4;i++){
+    var rg=espnScheduled['r32_'+r32pairs[i][0]+'_'+r32pairs[i][1]];
+    r32winners.push(rg&&rg.winner?rg.winner:(bracketWinners[r32pairs[i][0]+'_vs_'+r32pairs[i][1]]||null));
+  }
+
+  // S16 slots use R32 winners
+  var s16keys=[r32pairs[0][0]+'_s16_'+r32pairs[1][0], r32pairs[2][0]+'_s16_'+r32pairs[3][0]];
+  for(var i=0;i<2;i++){
+    var sw1=r32winners[i*2]||null;
+    var sw2=r32winners[i*2+1]||null;
+    var ssched=sw1&&sw2?findEspnScheduled(sw1,sw2):null;
+    // Build a fake slot with the winner names
+    if(!sw1&&!sw2){r3+=slot('Sweet 16');}
+    else{
+      var st1=sw1||'TBD';var st2=sw2||'TBD';
+      var sbadge='';var stimeInfo='';
+      if(ssched&&ssched.tm) stimeInfo='<span class="tm-t">'+ssched.d+' '+ssched.tm+' '+ssched.tv+'</span>';
+      else if(sw1&&sw2) stimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
+      if(ssched&&ssched.isFinal) sbadge='<span class="gm-final">FINAL</span>';
+      else if(ssched&&ssched.isLive) sbadge='<span class="gm-live">LIVE</span>';
+      r3+='<div class="gm">'
+        +'<div class="tr"><span class="tn'+(sw1?' bt':'')+'">'+st1+'</span>'+sbadge+'</div>'
+        +'<div class="tr"><span class="tn" style="color:'+(sw2?'#e2e8f0':'#334155')+'">'+st2+'</span>'+stimeInfo+'</div>'
+        +'</div>';
+    }
+    c2+=connSvg(rev);
+  }
+
+  // Elite 8 — 1 slot
+  var s16winners=[null,null];
+  for(var i=0;i<2;i++){
+    var sw1=r32winners[i*2]||null;var sw2=r32winners[i*2+1]||null;
+    if(sw1&&sw2){var esg=findEspnScheduled(sw1,sw2);if(esg&&esg.winner) s16winners[i]=esg.winner;}
+  }
+  var e1=s16winners[0];var e2=s16winners[1];
+  var esched=e1&&e2?findEspnScheduled(e1,e2):null;
+  if(!e1&&!e2){r4=slot('Elite 8');}
+  else{
+    var et1=e1||'TBD';var et2=e2||'TBD';
+    var ebadge='';var etimeInfo='';
+    if(esched&&esched.tm) etimeInfo='<span class="tm-t">'+esched.d+' '+esched.tm+' '+esched.tv+'</span>';
+    else if(e1&&e2) etimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
+    if(esched&&esched.isFinal) ebadge='<span class="gm-final">FINAL</span>';
+    else if(esched&&esched.isLive) ebadge='<span class="gm-live">LIVE</span>';
+    r4='<div class="gm">'
+      +'<div class="tr"><span class="tn'+(e1?' bt':'')+'">'+et1+'</span>'+ebadge+'</div>'
+      +'<div class="tr"><span class="tn" style="color:'+(e2?'#e2e8f0':'#334155')+'">'+et2+'</span>'+etimeInfo+'</div>'
+      +'</div>';
+  }
+  c3=connSvg(rev);
+
   var cols=[rndWrap(r1),rndWrap(c1),rndWrap(r2),rndWrap(c2),rndWrap(r3),rndWrap(c3),rndWrap(r4)];
   if(rev) cols.reverse();
   var lbl='<div class="reg-label" style="color:'+reg.c+'">'+reg.n+'</div>';
@@ -339,6 +598,42 @@ function findGameByTeams(homeTeam, awayTeam){
 
 var autoGradeLog=[];
 
+function extractNumber(str){
+  if(!str) return null;
+  var m=str.match(/[-+]?\d+\.?\d*/);
+  return m?parseFloat(m[0]):null;
+}
+
+function gradeTotal(betType, homeScore, awayScore){
+  // betType examples: "Over 162", "Under 145.5", "Total Over 162"
+  var bt=betType.toLowerCase();
+  var line=extractNumber(betType);
+  if(line===null) return null;
+  var combined=parseInt(homeScore)+parseInt(awayScore);
+  if(isNaN(combined)) return null;
+  if(bt.indexOf('over')>=0) return combined>line?'win':combined===line?'push':'loss';
+  if(bt.indexOf('under')>=0) return combined<line?'win':combined===line?'push':'loss';
+  return null;
+}
+
+function gradeSpread(betType, team, homeTeam, awayTeam, homeScore, awayScore){
+  // betType examples: "Spread -3.5", "Wisconsin -3.5", "-3.5"
+  var line=extractNumber(betType);
+  if(line===null) return null;
+  var hs=parseInt(homeScore);var as=parseInt(awayScore);
+  if(isNaN(hs)||isNaN(as)) return null;
+  // Determine if bet team is home or away
+  var betOnHome=teamNamesMatch(homeTeam,team);
+  var betOnAway=teamNamesMatch(awayTeam,team);
+  if(!betOnHome&&!betOnAway) return null;
+  // margin from perspective of bet team
+  var margin=betOnHome?(hs-as):(as-hs);
+  var covered=margin+line;
+  if(covered>0) return 'win';
+  if(covered<0) return 'loss';
+  return 'push';
+}
+
 function applyScores(games){
   var newGrades=0;
   for(var i=0;i<games.length;i++){
@@ -346,7 +641,6 @@ function applyScores(games){
     var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
     if(!gid) continue;
 
-    // Store result info for display
     gameResults[gid]={
       isFinal:eg.isFinal,
       isLive:eg.isLive,
@@ -359,25 +653,36 @@ function applyScores(games){
     };
 
     if(!eg.isFinal||!eg.winner) continue;
-
-    // Record bracket winner
     bracketWinners[gid]=eg.winner;
 
-    // Auto-grade straight bets on this game
     for(var j=0;j<straightBets.length;j++){
       var b=straightBets[j];
       if(b.assignedGame!==gid) continue;
-      if(b.result) continue; // already graded, don't overwrite manual grades
+      if(b.result) continue;
       if(!b.team) continue;
 
-      var betOnWinner=teamNamesMatch(eg.winner,b.team);
-      // For moneyline/spread we can auto-grade; for totals we can't know without the score spread
-      if(b.betType&&b.betType.toLowerCase().indexOf('total')>=0) continue;
+      var bt=(b.betType||'').toLowerCase();
+      var result=null;
 
-      b.result=betOnWinner?'win':'loss';
-      b.autoGraded=true;
-      newGrades++;
-      autoGradeLog.push({team:b.team,result:b.result,game:gid});
+      if(bt.indexOf('total')>=0||bt.indexOf('over')>=0||bt.indexOf('under')>=0){
+        // Total bet — grade by combined score
+        result=gradeTotal(b.betType,eg.homeScore,eg.awayScore);
+      }else if(bt.indexOf('spread')>=0||bt.indexOf('-')>=0||bt.indexOf('+')>=0){
+        // Spread bet — grade by margin
+        result=gradeSpread(b.betType,b.team,eg.homeTeam,eg.awayTeam,eg.homeScore,eg.awayScore);
+        // Fallback to moneyline if spread parse fails
+        if(!result) result=teamNamesMatch(eg.winner,b.team)?'win':'loss';
+      }else{
+        // Moneyline
+        result=teamNamesMatch(eg.winner,b.team)?'win':'loss';
+      }
+
+      if(result){
+        b.result=result;
+        b.autoGraded=true;
+        newGrades++;
+        autoGradeLog.push({team:b.team,result:b.result,game:gid});
+      }
     }
   }
   return newGrades;
@@ -388,17 +693,145 @@ function fetchScores(){
     .then(function(r){return r.json();})
     .then(function(data){
       if(!data.games) return;
+      // Store all games for later round scheduling
+      for(var i=0;i<data.games.length;i++){
+        var eg=data.games[i];
+        var key=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
+        espnScheduled[key]={
+          homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
+          tm:eg.statusText||'',tv:'',d:'',
+          isFinal:eg.isFinal,isLive:eg.isLive,
+          winner:eg.winner,
+          homeScore:eg.homeScore,awayScore:eg.awayScore
+        };
+      }
       var graded=applyScores(data.games);
       lastScoreFetch=Date.now();
       if(graded>0||Object.keys(gameResults).length>0) draw();
     })
-    .catch(function(err){console.warn('Score fetch failed:',err);});
+    .catch(function(){});
 }
 
 function startScorePolling(){
   fetchScores(); // immediate first fetch
   if(scoreFetchInterval) clearInterval(scoreFetchInterval);
   scoreFetchInterval=setInterval(fetchScores, 120000); // every 2 min
+}
+
+
+function shareStats(){
+  // Build a hidden off-screen div with bracket + stats combined
+  var rs=getRoundStats();
+  var ps=getParlayStats();
+  var totalSt=0,totalWi=0,totalLo=0,totalPL=0;
+  for(var i=0;i<straightBets.length;i++){
+    var b=straightBets[i];totalSt+=b.stake||0;
+    if(b.result==="win"){totalWi++;totalPL+=(b.potentialPayout||0)-(b.stake||0);}
+    if(b.result==="loss"){totalLo++;totalPL-=b.stake||0;}
+  }
+  var pps=getParlayStats();
+  totalSt+=pps.st;totalPL+=pps.pl;
+  var plC=totalPL>=0?"#10b981":"#ef4444";
+  var plT=(totalPL>=0?"+":"")+"$"+Math.abs(totalPL).toFixed(2);
+
+  // Build the bracket HTML (reuse existing bracket render)
+  var bracketHTML="";
+  var savedTab=curTab;
+  curTab="bracket";
+  // We'll capture the existing bracket by temporarily switching tabs
+  // Instead, build a standalone snapshot div
+  var snap=document.createElement("div");
+  snap.style.cssText="position:fixed;left:-9999px;top:0;width:1200px;background:#0a0e1a;font-family:system-ui,-apple-system,sans-serif;padding:0;z-index:9999";
+
+  // Header strip
+  var hdr=document.createElement("div");
+  hdr.style.cssText="background:linear-gradient(135deg,#061a30,#0a0e1a);padding:14px 24px;border-bottom:2px solid #00b4d8";
+  hdr.innerHTML='<div style="font-size:18px;font-weight:900;color:#e2e8f0">March Madness 2026 Bet Tracker powered by <span style="color:#00b4d8">OddsJam.com</span></div>'
+    +'<div style="display:flex;gap:20px;margin-top:6px;font-size:12px">'
+    +'<span style="color:#64748b">Total Bets: <strong style="color:#e2e8f0">'+(straightBets.length+parlays.length)+'</strong></span>'
+    +'<span style="color:#64748b">Staked: <strong style="color:#e2e8f0">$'+totalSt.toFixed(2)+'</strong></span>'
+    +'<span style="color:#64748b">Record: <strong style="color:#e2e8f0">'+totalWi+'-'+totalLo+'</strong></span>'
+    +'<span style="color:#64748b">P&L: <strong style="color:'+plC+'">'+plT+'</strong></span>'
+    +'</div>';
+  snap.appendChild(hdr);
+
+  // Bracket section label
+  var blbl=document.createElement("div");
+  blbl.style.cssText="padding:8px 24px;background:#06162b;font-size:10px;font-weight:800;color:#00b4d8;letter-spacing:2px;border-bottom:1px solid #1c2640";
+  blbl.textContent="BRACKET";
+  snap.appendChild(blbl);
+
+  // Clone the current bracket scroll area
+  var bracketEl=document.querySelector(".bracket-scroll");
+  if(bracketEl){
+    var bClone=bracketEl.cloneNode(true);
+    bClone.style.cssText="overflow:visible;padding:12px 8px;background:#0a0e1a";
+    snap.appendChild(bClone);
+  }
+
+  // Stats section label
+  var slbl=document.createElement("div");
+  slbl.style.cssText="padding:8px 24px;background:#06162b;font-size:10px;font-weight:800;color:#00b4d8;letter-spacing:2px;border-bottom:1px solid #1c2640;margin-top:4px";
+  slbl.textContent="ROUND-BY-ROUND STATS";
+  snap.appendChild(slbl);
+
+  // Stats grid
+  var sgrid=document.createElement("div");
+  sgrid.style.cssText="display:flex;flex-wrap:wrap;gap:10px;padding:14px 24px;background:#0a0e1a";
+  var rounds=["R64","R32","S16","E8","F4","Championship"];
+  var rnames={"R64":"Round of 64","R32":"Round of 32","S16":"Sweet 16","E8":"Elite 8","F4":"Final Four","Championship":"Championship"};
+  for(var ri=0;ri<rounds.length;ri++){
+    var rk=rounds[ri];var rd=rs[rk];
+    if(!rd) continue;
+    var rplC=rd.pl>=0?"#10b981":"#ef4444";
+    var card=document.createElement("div");
+    card.style.cssText="background:#111827;border-radius:8px;padding:10px 14px;border-left:3px solid #00b4d8;min-width:160px;flex:1";
+    card.innerHTML='<div style="font-size:11px;font-weight:800;color:#00b4d8;margin-bottom:4px">'+rnames[rk]+'</div>'
+      +'<div style="font-size:18px;font-weight:900;color:'+rplC+'">'+(rd.pl>=0?"+":"")+'$'+Math.abs(rd.pl).toFixed(2)+'</div>'
+      +'<div style="font-size:10px;color:#64748b;margin-top:4px">'+rd.bets+' bets &bull; '+rd.wi+'-'+rd.lo+' &bull; $'+rd.st.toFixed(2)+' staked</div>';
+    sgrid.appendChild(card);
+  }
+  // Parlay card
+  var pcard=document.createElement("div");
+  pcard.style.cssText="background:#111827;border-radius:8px;padding:10px 14px;border-left:3px solid #f97316;min-width:160px;flex:1";
+  var pplC=pps.pl>=0?"#10b981":"#ef4444";
+  pcard.innerHTML='<div style="font-size:11px;font-weight:800;color:#f97316;margin-bottom:4px">Parlays</div>'
+    +'<div style="font-size:18px;font-weight:900;color:'+pplC+'">'+(pps.pl>=0?"+":"")+'$'+Math.abs(pps.pl).toFixed(2)+'</div>'
+    +'<div style="font-size:10px;color:#64748b;margin-top:4px">'+pps.total+' parlays &bull; '+pps.wi+'-'+pps.lo+' &bull; $'+pps.st.toFixed(2)+' staked</div>';
+  sgrid.appendChild(pcard);
+  snap.appendChild(sgrid);
+
+  // OddsJam footer
+  var ftr=document.createElement("div");
+  ftr.style.cssText="padding:10px 24px;background:#061a30;border-top:1px solid #1c2640;font-size:11px;color:#475569;text-align:center";
+  ftr.innerHTML='Find the sharpest bets and best odds all tournament at <span style="color:#00b4d8;font-weight:700">OddsJam.com</span>';
+  snap.appendChild(ftr);
+
+  document.body.appendChild(snap);
+
+  var btn=document.getElementById("shareBtn");
+  if(btn){btn.textContent="Generating...";btn.disabled=true;}
+
+  html2canvas(snap,{
+    backgroundColor:"#0a0e1a",
+    scale:2,
+    useCORS:true,
+    allowTaint:true,
+    width:1200,
+    windowWidth:1200
+  }).then(function(canvas){
+    document.body.removeChild(snap);
+    if(btn){btn.textContent="Share Stats";btn.disabled=false;}
+    var link=document.createElement("a");
+    link.download="march-madness-tracker-"+new Date().toISOString().slice(0,10)+".png";
+    link.href=canvas.toDataURL("image/png");
+    link.click();
+  }).catch(function(err){
+    document.body.removeChild(snap);
+    if(btn){btn.textContent="Share Stats";btn.disabled=false;}
+    console.error("Screenshot failed:",err);
+    alert("Screenshot failed — try again");
+  });
 }
 
 function draw(){
@@ -418,9 +851,11 @@ function draw(){
   // Header
   h+='<div class="hdr">';
   h+='<div class="hdr-top">';
-  h+='<div class="logo"><span class="oj">OddsJam</span> March Madness 2026 <span class="sub">Bet Tracker</span></div>';
+  h+='<div><div class="logo">March Madness 2026 Bet Tracker powered by <a href="https://oddsjam.com/?ref=ngy1ota" target="_blank" style="color:#00b4d8;text-decoration:none">OddsJam.com</a></div><div style="font-size:11px;color:#fbbf24;margin-top:2px">Find the sharpest bets and best odds all tournament using <a href="https://oddsjam.com/?ref=ngy1ota" target="_blank" style="color:#00b4d8;text-decoration:none">OddsJam</a></div></div>';
   h+='<div style="display:flex;gap:8px">';
-  h+='<button class="btn btn-p" id="upBtn"'+(isParsing?' disabled style="opacity:0.5"':'')+'>+ Upload Slip</button>';
+  h+='<button class="btn btn-p" id="upBtn"'+(isParsing?' disabled style="opacity:0.5"':'')+'>+ Upload Bet Slip</button>';
+  h+='<button class="btn btn-s" id="shareBtn" onclick="shareStats()" style="background:linear-gradient(135deg,#7c3aed,#5b21b6)"> Share Stats</button>';
+  h+='<button class="btn btn-s" onclick="clearStorage()" style="font-size:11px;padding:6px 10px;color:#475569">Clear</button>';
   h+='</div></div>';
   h+='<div class="hdr-stats">';
   h+='<span><span class="lb">Total Bets: </span><span class="vl">'+(straightBets.length+parlays.length)+'</span></span>';
@@ -437,7 +872,7 @@ function draw(){
     h+='<div class="log-bar">';
     for(var i=Math.max(0,logz.length-4);i<logz.length;i++){
       var lg=logz[i];
-      h+='<span style="color:'+(lg.ok?"#10b981":"#ef4444")+'">'+(lg.ok?"&#10003; "+lg.f+" ("+lg.n+")":"&#10007; "+lg.f+(lg.msg?" - "+lg.msg:""))+'</span>';
+      h+='<span style="color:'+(lg.ok?"#10b981":"#ef4444")+'">'+(lg.ok?"+ "+lg.f+" ("+lg.n+")":"x "+lg.f+(lg.msg?" - "+lg.msg:""))+'</span>';
     }
     h+='</div>';
   }
@@ -445,7 +880,7 @@ function draw(){
   // Auto-grade notification bar
   if(autoGradeLog.length>0){
     var lastGrades=autoGradeLog.slice(-3);
-    h+='<div class="auto-grade-bar">&#9881; Auto-graded: ';
+    h+='<div class="auto-grade-bar"> Auto-graded: ';
     for(var i=0;i<lastGrades.length;i++){
       var ag=lastGrades[i];
       h+='<span style="font-weight:700;color:'+(ag.result==="win"?"#4ade80":"#ef4444")+'">'+ag.team+' '+ag.result.toUpperCase()+'</span> ';
@@ -456,7 +891,7 @@ function draw(){
     h+='</div>';
   }else if(lastScoreFetch){
     var sinceMin=Math.round((Date.now()-lastScoreFetch)/60000);
-    h+='<div class="auto-grade-bar" style="background:#06162b;border-bottom-color:#1c2640;color:#475569">&#9881; Scores synced &mdash; <span style="margin-left:4px">'+sinceMin+'m ago (updates every 2 min)</span></div>';
+    h+='<div class="auto-grade-bar" style="background:#06162b;border-bottom-color:#1c2640;color:#475569"> Scores synced &mdash; <span style="margin-left:4px">'+sinceMin+'m ago (updates every 2 min)</span></div>';
   }
 
   // Tab bar
@@ -471,7 +906,7 @@ function draw(){
   var ua=[];
   for(var i=0;i<straightBets.length;i++){if(!straightBets[i].assignedGame) ua.push(straightBets[i]);}
   if(ua.length&&curTab!=="parlays"){
-    h+='<div class="ua-bar"><span style="color:#f59e0b;font-weight:700">&#9888; '+ua.length+' unmatched bet'+(ua.length>1?"s":"")+':</span> ';
+    h+='<div class="ua-bar"><span style="color:#f59e0b;font-weight:700">! '+ua.length+' unmatched bet'+(ua.length>1?"s":"")+':</span> ';
     for(var i=0;i<ua.length;i++){
       var b=ua[i];
       h+='<span class="ua-chip"><span>'+(b.team||"?")+'</span>';
@@ -492,22 +927,18 @@ function draw(){
     h+=buildRegion(E,false);
     h+=buildRegion(S,false);
     h+='</div>';
-    h+='<div class="ctr">';
-    h+='<div class="f4" style="border-color:#3b82f6;color:#3b82f6">&#127942; FINAL FOUR<br><span style="font-size:9px;color:#475569;font-weight:400;display:block;margin-top:2px">East / South</span><span style="font-size:10px;font-weight:400;color:#94a3b8;display:block;margin-top:4px">TBD</span></div>';
-    h+='<div class="ch">&#127941; CHAMPION<br><span style="font-size:11px;font-weight:400;color:#64748b;display:block;margin-top:4px">TBD</span></div>';
-    h+='<div class="f4" style="border-color:#ef4444;color:#ef4444">&#127942; FINAL FOUR<br><span style="font-size:9px;color:#475569;font-weight:400;display:block;margin-top:2px">West / Midwest</span><span style="font-size:10px;font-weight:400;color:#94a3b8;display:block;margin-top:4px">TBD</span></div>';
-    h+='</div>';
+    h+=buildCenterColumn();
     h+='<div class="half">';
     h+=buildRegion(W,true);
     h+=buildRegion(M,true);
     h+='</div>';
     h+='</div></div>';
-    h+='<div class="footer-msg">&#128994; Highlighted games have straight bets &mdash; P&amp;L shown per game &mdash; Parlays tracked separately under Parlays tab</div>';
+    h+='<div class="footer-msg"> Highlighted games have straight bets &mdash; P&amp;L shown per game &mdash; Parlays tracked separately under Parlays tab</div>';
 
   }else if(curTab==="straight"){
     h+='<div class="lst">';
     if(!straightBets.length){
-      h+='<div class="empty-state"><div class="icon">&#127936;</div><div style="font-size:16px;font-weight:700">No straight bets yet</div><div style="font-size:12px;margin-top:8px;color:#334155">Upload a bet slip to get started</div></div>';
+      h+='<div class="empty-state"><div class="icon"></div><div style="font-size:16px;font-weight:700">No straight bets yet</div><div style="font-size:12px;margin-top:8px;color:#334155">Upload a bet slip to get started</div></div>';
     }else{
       for(var i=0;i<straightBets.length;i++){
         var b=straightBets[i];
@@ -515,13 +946,11 @@ function draw(){
         var bp=b.result==="win"?((b.potentialPayout||0)-(b.stake||0)):b.result==="loss"?-(b.stake||0):0;
         var btns="";
         if(!b.result){
-          btns='<div style="display:flex;gap:6px;margin-top:8px">';
-          btns+='<button class="rbt" data-r="win" data-b="'+b.id+'" data-type="straight" style="background:#10b981">WIN</button>';
-          btns+='<button class="rbt" data-r="loss" data-b="'+b.id+'" data-type="straight" style="background:#ef4444">LOSS</button>';
-          btns+='<button class="rbt" data-r="push" data-b="'+b.id+'" data-type="straight" style="background:#f59e0b">PUSH</button></div>';
+          btns='<div style="margin-top:6px;font-size:11px;color:#475569">Pending — will auto-grade when game goes final</div>';
         }else{
           var xc=b.result==="win"?"#10b981":b.result==="loss"?"#ef4444":"#f59e0b";
-          btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-weight:700;font-size:14px;color:'+xc+'">'+(bp>=0?"+":"")+'$'+Math.abs(bp).toFixed(2)+'</span><button class="rbt" data-r="undo" data-b="'+b.id+'" data-type="straight" style="background:#1e293b;flex:0;padding:4px 10px;font-size:10px">Undo</button></div>';
+          var gradedBy=b.autoGraded?'<span style="font-size:9px;color:#047857;margin-left:6px">AUTO-GRADED</span>':'';
+          btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-weight:700;font-size:14px;color:'+xc+'">'+(bp>=0?"+":"")+'$'+Math.abs(bp).toFixed(2)+gradedBy+'</span></div>';
         }
         h+='<div class="bi" style="border-left-color:'+(g?g.rc:"#00b4d8")+'">';
         h+='<div style="display:flex;justify-content:space-between;align-items:center">';
@@ -536,9 +965,9 @@ function draw(){
 
   }else if(curTab==="parlays"){
     h+='<div class="lst">';
-    h+='<div class="parlay-note">&#9888; Game-by-game P&amp;L is only tracked for straight bets. Parlays are tracked here as a single unit &mdash; mark the whole parlay W/L when it settles.</div>';
+    h+='<div class="parlay-note">! Game-by-game P&amp;L is only tracked for straight bets. Parlays are tracked here as a single unit &mdash; mark the whole parlay W/L when it settles.</div>';
     if(!parlays.length){
-      h+='<div class="empty-state"><div class="icon">&#127928;</div><div style="font-size:16px;font-weight:700">No parlays yet</div><div style="font-size:12px;margin-top:8px;color:#334155">Upload a bet slip with a parlay to get started</div></div>';
+      h+='<div class="empty-state"><div class="icon"></div><div style="font-size:16px;font-weight:700">No parlays yet</div><div style="font-size:12px;margin-top:8px;color:#334155">Upload a bet slip with a parlay to get started</div></div>';
     }else{
       for(var i=0;i<parlays.length;i++){
         var p=parlays[i];
@@ -637,9 +1066,31 @@ function bindEvents(){
       var gid=this.value;
       if(!gid) return;
       for(var j=0;j<straightBets.length;j++){if(straightBets[j].id===bid){straightBets[j].assignedGame=gid;break;}}
+      saveToStorage();
       draw();
     });
   }
+
+  // Drag and drop anywhere on page
+  var overlay=document.getElementById("dragOverlay");
+  var dragCounter=0;
+  document.addEventListener("dragenter",function(ev){
+    ev.preventDefault();
+    dragCounter++;
+    if(overlay) overlay.className="drag-overlay active";
+  });
+  document.addEventListener("dragleave",function(ev){
+    dragCounter--;
+    if(dragCounter<=0){dragCounter=0;if(overlay) overlay.className="drag-overlay";}
+  });
+  document.addEventListener("dragover",function(ev){ev.preventDefault();});
+  document.addEventListener("drop",function(ev){
+    ev.preventDefault();
+    dragCounter=0;
+    if(overlay) overlay.className="drag-overlay";
+    var files=ev.dataTransfer.files;
+    if(files&&files.length&&!isParsing) doUpload(files);
+  });
 
   document.getElementById("app").addEventListener("click",function(ev){
     var el=ev.target;
@@ -741,6 +1192,7 @@ function doUpload(files){
         if(newStraight>0) msg+=newStraight+" straight bet"+(newStraight>1?"s":"");
         if(newParlay>0) msg+=(msg?", ":"")+newParlay+" parlay"+(newParlay>1?"s":"");
         logz.push({f:f.name,ok:true,n:msg||"0 bets"});
+        saveToStorage();
         next();
       }).catch(function(){logz.push({f:f.name,ok:false,msg:"Network error - check API_BASE_URL"});next();});
     };
@@ -749,6 +1201,7 @@ function doUpload(files){
   next();
 }
 
+loadFromStorage();
 startScorePolling();
 draw();
 </script>
