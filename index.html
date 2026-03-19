@@ -297,8 +297,9 @@ function gameCard(g){
   if(br){var bc=br==="win"?"#059669":br==="loss"?"#dc2626":"#d97706";badge='<div class="rb" style="background:'+bc+'">'+br.charAt(0).toUpperCase()+'</div>';}
   var gr=gameResults[g.id];
   var statusBadge='';var scoreStr='';
-  if(gr&&gr.isFinal){statusBadge='<span class="gm-final">FINAL</span>';scoreStr='<span class="gm-score">'+gr.awayScore+'-'+gr.homeScore+'</span>';}
-  else if(gr&&gr.isLive){statusBadge='<span class="gm-live">LIVE</span>';scoreStr='<span class="gm-score">'+gr.awayScore+'-'+gr.homeScore+'</span>';}
+    function abbr(n){return n?n.replace(/[^A-Z0-9]/g,'').substring(0,4)||n.substring(0,4).toUpperCase():'?';}
+  if(gr&&gr.isFinal){statusBadge='<span class="gm-final">FINAL</span>';scoreStr='<span class="gm-score">'+abbr(gr.awayTeam)+' '+gr.awayScore+' - '+gr.homeScore+' '+abbr(gr.homeTeam)+'</span>';}
+  else if(gr&&gr.isLive){statusBadge='<span class="gm-live">LIVE</span>';scoreStr='<span class="gm-score">'+abbr(gr.awayTeam)+' '+gr.awayScore+' - '+gr.homeScore+' '+abbr(gr.homeTeam)+'</span>';}
   var t1disp=g.t1;var t2disp=g.t2;
   if(gr&&gr.isFinal&&gr.winner){
     if(!teamNamesMatch(gr.winner,g.t1)) t1disp='<span style="opacity:0.38;text-decoration:line-through">'+g.t1+'</span>';
