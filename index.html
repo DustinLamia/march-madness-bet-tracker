@@ -85,13 +85,24 @@ body{background:#0a0e1a;color:#e2e8f0;font-family:system-ui,-apple-system,sans-s
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
 .auto-grade-bar{padding:5px 20px;background:#064e3b;border-bottom:1px solid #10b981;font-size:10px;color:#10b981;display:flex;align-items:center;gap:6px}
 #fi{display:none}
+.gm-expanded{border-color:#00b4d8 !important;border-width:2px !important}
+.gm-drawer{background:#080c18;border-top:1px solid #1c2640;padding:8px}
+.gm-drawer-bet{padding:6px 0;border-bottom:1px solid #1c2640;font-size:11px}
+.gm-drawer-bet:last-child{border-bottom:none}
 .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.7);z-index:500;display:flex;align-items:center;justify-content:center}
 .modal-box{background:#111827;border:1px solid #1c2640;border-radius:12px;padding:20px;max-width:420px;width:90%;max-height:80vh;overflow-y:auto}
 .modal-box h3{font-size:14px;font-weight:800;color:#00b4d8;margin-bottom:12px;letter-spacing:1px}
 .modal-bet{background:#0a0e1a;border-radius:8px;padding:10px;margin-bottom:8px;border-left:3px solid #00b4d8}
 .modal-close{float:right;background:none;border:none;color:#64748b;font-size:18px;cursor:pointer;margin-top:-4px}
-.drag-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,180,216,0.12);border:3px dashed #00b4d8;z-index:999;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#00b4d8;letter-spacing:2px}
+.drag-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,180,216,0.08);border:3px dashed #00b4d8;z-index:999;display:none;align-items:center;justify-content:center;font-size:22px;font-weight:800;color:#00b4d8;letter-spacing:2px;pointer-events:none}
 .drag-overlay.active{display:flex}
+.upload-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.75);z-index:600;display:flex;align-items:center;justify-content:center}
+.upload-box{background:#111827;border:1px solid #1c2640;border-radius:16px;padding:32px;max-width:440px;width:90%;text-align:center}
+.upload-drop-zone{border:2px dashed #1c2640;border-radius:10px;padding:36px 20px;cursor:pointer;transition:border-color 0.2s,background 0.2s;margin-bottom:16px}
+.upload-drop-zone:hover,.upload-drop-zone.drag-over{border-color:#00b4d8;background:rgba(0,180,216,0.06)}
+.upload-drop-zone .dz-icon{font-size:36px;margin-bottom:10px;color:#334155}
+.upload-drop-zone .dz-title{font-size:15px;font-weight:700;color:#e2e8f0;margin-bottom:4px}
+.upload-drop-zone .dz-sub{font-size:12px;color:#64748b}
 </style>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-DLTDQC3RTZ"></script>
@@ -188,14 +199,20 @@ var gameResults={};   // gid -> {isFinal, winner, score, isLive, statusText}
 var bracketWinners={}; // gid -> winning team name
 var lastScoreFetch=0;
 var activeGameModal=null;
+var showUploadModal=false;
 
 function showGameModal(gid){
-  activeGameModal=gid;
+  activeGameModal=activeGameModal===gid?null:gid;
   draw();
 }
 
 function closeModal(){
   activeGameModal=null;
+  draw();
+}
+
+function closeUploadModal(){
+  showUploadModal=false;
   draw();
 }
 
@@ -339,7 +356,7 @@ function gameCard(g){
     var pcolor=pb.result==="win"?"#10b981":pb.result==="loss"?"#ef4444":pb.result==="push"?"#f59e0b":"#94a3b8";
     pendingStrip+='<div style="font-size:9px;padding:2px 8px;color:'+pcolor+';border-top:1px solid #1c2640">'+(pb.betType||pb.team||"Bet")+' $'+(pb.stake||0).toFixed(0)+(pb.result?' — '+pb.result.toUpperCase():' — Pending')+"</div>";
   }
-  return '<div class="'+cls+'" onclick="showGameModal(\"'+g.id+'\")' +' style="cursor:pointer">'
+  return '<div class="'+cls+'" onclick="showGameModal(\"'+g.id+'\")" style="cursor:pointer">'
     +'<div class="tr"><span class="sd">('+g.s1+')</span><span class="tn'+(info.hasBet?" bt":"")+'">'+t1disp+plBadge+'</span>'+statusBadge+scoreStr+'</div>'
     +'<div class="tr"><span class="sd">('+g.s2+')</span><span class="tn">'+t2disp+'</span><span class="tm-t">'+g.d+' '+g.tm+' '+g.tv+'</span></div>'
     +pendingStrip+badge+'</div>';
@@ -1058,6 +1075,27 @@ function draw(){
     h+='</div>';
   }
 
+  // Upload modal
+  if(showUploadModal){
+    h+='<div class="upload-modal" id="uploadModal">';
+    h+='<div class="upload-box">';
+    h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:20px">';
+    h+='<div style="font-size:16px;font-weight:800;color:#e2e8f0">Upload Bet Slips</div>';
+    h+='<button onclick="closeUploadModal()" style="background:none;border:none;color:#64748b;font-size:20px;cursor:pointer;line-height:1">x</button>';
+    h+='</div>';
+    h+='<div class="upload-drop-zone" id="dropZone">' ;
+    h+='<label for="fi" style="display:block;cursor:pointer;width:100%;height:100%">' ;
+    h+='<div class="dz-icon">+</div>';
+    h+='<div class="dz-title">Drop bet slips here</div>';
+    h+='<div class="dz-sub">or click to browse files</div>';
+    h+='<div class="dz-sub" style="margin-top:6px;color:#334155">Supports DraftKings, FanDuel, BetMGM, ProphetX, Caesars &amp; more</div>';
+    h+='</label>';
+    h+='</div>';
+    h+='<div style="font-size:11px;color:#475569;text-align:center">Multiple files supported &mdash; AI reads your slips automatically</div>';
+    h+='</div></div>';
+  }
+
+
   // Game modal
   if(activeGameModal){
     var mg=null;for(var i=0;i<flat.length;i++){if(flat[i].id===activeGameModal){mg=flat[i];break;}}
@@ -1067,7 +1105,7 @@ function draw(){
     h+='<div class="modal-box" onclick="event.stopPropagation()">';
     h+='<button class="modal-close" onclick="closeModal()">x</button>';
     if(mg&&mg.t1){
-      h+='<h3>'+(mg.t1||"")+(mg.s1?"  ("+mg.s1+")":"")+' vs '+(mg.t2||"")+(mg.s2?" ("+mg.s2+")":"")+'</h3>';
+      h+='<h3>'+(mg.t1||'')+(mg.s1?' ('+mg.s1+')':'')+' vs '+(mg.t2||'')+(mg.s2?' ('+mg.s2+')':'')+' </h3>';
     }else{
       h+='<h3>Game Bets</h3>';
     }
@@ -1101,7 +1139,7 @@ function draw(){
           h+='<button class="rbt" data-r="push" data-b="'+mb.id+'" data-type="straight" style="background:#f59e0b">PUSH</button>';
           h+='</div>';
         }else if(mb.result){
-          h+='<div style="font-size:10px;color:'+mbc+';margin-top:4px;font-weight:700">'+mb.result.toUpperCase()+(mb.autoGraded?' — Auto-graded':'')+' <button class="rbt" data-r="undo" data-b="'+mb.id+'" data-type="straight" style="background:#1e293b;flex:0;padding:2px 8px;font-size:9px">Undo</button></div>';
+          h+='<div style="font-size:10px;color:'+mbc+';margin-top:4px;font-weight:700">'+mb.result.toUpperCase()+(mb.autoGraded?' — Auto-graded':'')+'</div>';
         }else{
           h+='<div style="font-size:10px;color:#475569;margin-top:4px">Pending — auto-grades when final</div>';
         }
@@ -1118,12 +1156,13 @@ function draw(){
 
 function bindEvents(){
   var upBtn=document.getElementById("upBtn");
-  if(upBtn) upBtn.addEventListener("click",function(){if(!isParsing) document.getElementById("fi").click();});
+  if(upBtn) upBtn.addEventListener("click",function(){if(!isParsing){showUploadModal=true;draw();}});
 
   var fi=document.getElementById("fi");
   if(fi) fi.addEventListener("change",function(){
     var files=this.files;
     if(!files||!files.length) return;
+    showUploadModal=false;
     doUpload(files);
     this.value="";
   });
@@ -1142,6 +1181,18 @@ function bindEvents(){
       for(var j=0;j<straightBets.length;j++){if(straightBets[j].id===bid){straightBets[j].assignedGame=gid;break;}}
       saveToStorage();
       draw();
+    });
+  }
+
+  // Upload modal drop zone drag events
+  var dz=document.getElementById("dropZone");
+  if(dz){
+    dz.addEventListener("dragover",function(ev){ev.preventDefault();dz.classList.add("drag-over");});
+    dz.addEventListener("dragleave",function(){dz.classList.remove("drag-over");});
+    dz.addEventListener("drop",function(ev){
+      ev.preventDefault();dz.classList.remove("drag-over");
+      var files=ev.dataTransfer.files;
+      if(files&&files.length&&!isParsing){showUploadModal=false;doUpload(files);}
     });
   }
 
