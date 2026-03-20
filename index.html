@@ -465,11 +465,9 @@ function connSvg(rev){
 function liveSlot(g1id,g2id,round,espnSched){
   var w1=bracketWinners[g1id]||null;
   var w2=bracketWinners[g2id]||null;
-  // Always show slot if at least one winner is known
   if(!w1&&!w2) return slot(round);
   var t1=w1?abbr(w1):'TBD';
   var t2=w2?abbr(w2):'TBD';
-  // Only use ESPN game data if BOTH teams have advanced AND game date has passed
   var roundOk=ROUND_EARLIEST_FINAL['R32']?Date.now()>ROUND_EARLIEST_FINAL['R32']:false;
   var gr=(w1&&w2&&espnSched&&espnSched.isFinal&&roundOk)?espnSched:null;
   var statusBadge="";var timeInfo="";
@@ -481,10 +479,37 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t2strike=gr&&gr.winner&&!teamNamesMatch(gr.winner,w2||"");
   var t1d=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
-  return '<div class="gm">'
-    +'<div class="tr"><span class="tn'+(w1?' bt':'')+'">'+t1d+'</span>'+statusBadge+'</div>'
+  // Find bets assigned to this slot (by espnScheduled key or team name match)
+  var slotBets=[];
+  for(var si=0;si<straightBets.length;si++){
+    var sb=straightBets[si];
+    // Match by assigned game key from espnScheduled
+    if(sb.assignedGame&&espnSched){
+      var key=(espnSched.homeTeam+'_'+espnSched.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
+      var key2=(espnSched.awayTeam+'_'+espnSched.homeTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
+      if(sb.assignedGame===key||sb.assignedGame===key2) slotBets.push(sb);
+    }
+    // Also match if team name matches one of the winners
+    if(!slotBets.includes(sb)&&sb.team&&w1&&w2){
+      if(teamNamesMatch(w1,sb.team)||teamNamesMatch(w2,sb.team)){
+        // Only if opponent also matches
+        var opp=sb.opponent||"";
+        if(opp&&(teamNamesMatch(w1,opp)||teamNamesMatch(w2,opp))) slotBets.push(sb);
+      }
+    }
+  }
+  var betStrip="";
+  for(var bi=0;bi<slotBets.length;bi++){
+    var pb=slotBets[bi];
+    var pcolor=pb.result==="win"?"#10b981":pb.result==="loss"?"#ef4444":pb.result==="push"?"#f59e0b":"#94a3b8";
+    betStrip+='<div style="font-size:9px;padding:2px 8px;color:'+pcolor+';border-top:1px solid #1c2640">'+( pb.betType||pb.team||"Bet")+' $'+(pb.stake||0).toFixed(0)+(pb.result?' - '+pb.result.toUpperCase():' - Pending')+'</div>';
+  }
+  var hasBets=slotBets.length>0;
+  var slotCls="gm"+(hasBets?" hb":"");
+  return '<div class="'+slotCls+'">'
+    +'<div class="tr"><span class="tn'+(w1?' bt':'')+ '">'+t1d+'</span>'+statusBadge+'</div>'
     +'<div class="tr"><span class="tn" style="color:'+(w2?'#e2e8f0':'#334155')+'">'+t2d+'</span>'+timeInfo+'</div>'
-    +'</div>';
+    +betStrip+'</div>';
 }
 
 function getRegionE8Winner(reg){
