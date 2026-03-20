@@ -271,6 +271,8 @@ function isPropBet(b){
 }
 var espnScheduled={};  // key
 // Manual overrides for games ESPN is returning bad data for
+espnScheduled['texas_gonzaga']={homeTeam:'Gonzaga',awayTeam:'Texas',tm:'3/21 7:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
+espnScheduled['gonzaga_texas']={homeTeam:'Gonzaga',awayTeam:'Texas',tm:'3/21 7:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 espnScheduled['texasam_houston']={homeTeam:'Houston',awayTeam:'Texas AM',tm:'3/21 6:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 espnScheduled['houston_texasam']={homeTeam:'Houston',awayTeam:'Texas AM',tm:'3/21 6:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 var scoreFetchInterval=null;
@@ -311,20 +313,37 @@ function splitWords(str){
 }
 
 function matchBet(b){
+  // Extract opponent from game field if not set (e.g. "Texas vs Gonzaga")
+  var opp=b.opponent||"";
+  if(!opp&&b.game){
+    var vsMatch=b.game.match(/vs\.?\s+(.+)/i);
+    if(vsMatch) opp=vsMatch[1].trim();
+  }
   // If both team and opponent known, require BOTH to match same game
-  if(b.team&&b.opponent){
+  if(b.team&&opp){
     for(var i=0;i<flat.length;i++){
       var g=flat[i];if(!g.t1||!g.t2) continue;
       if((teamNamesMatch(g.t1,b.team)||teamNamesMatch(g.t2,b.team))&&
-         (teamNamesMatch(g.t1,b.opponent)||teamNamesMatch(g.t2,b.opponent))) return g.id;
+         (teamNamesMatch(g.t1,opp)||teamNamesMatch(g.t2,opp))) return g.id;
+    }
+    // Also check espnScheduled for later round matchups
+    for(var k in espnScheduled){
+      var eg=espnScheduled[k];if(!eg.homeTeam||!eg.awayTeam) continue;
+      if((teamNamesMatch(eg.homeTeam,b.team)||teamNamesMatch(eg.awayTeam,b.team))&&
+         (teamNamesMatch(eg.homeTeam,opp)||teamNamesMatch(eg.awayTeam,opp))){
+        // Return a synthetic id for this matchup
+        return k;
+      }
     }
   }
-  // Single team fallback
-  var t=((b.game||"")+" "+(b.team||"")).toLowerCase();
-  for(var i=0;i<flat.length;i++){
-    var g=flat[i];if(!g.t1||!g.t2) continue;
-    var ps=splitWords(g.t1.toLowerCase()).concat(splitWords(g.t2.toLowerCase()));
-    for(var j=0;j<ps.length;j++){if(ps[j].length>3&&!{state:1,university:1,north:1,south:1}[ps[j]]&&t.indexOf(ps[j])>=0) return g.id;}
+  // Single team fallback — only use if no opponent info at all
+  if(!opp){
+    var t=((b.game||"")+" "+(b.team||"")).toLowerCase();
+    for(var i=0;i<flat.length;i++){
+      var g=flat[i];if(!g.t1||!g.t2) continue;
+      var ps=splitWords(g.t1.toLowerCase()).concat(splitWords(g.t2.toLowerCase()));
+      for(var j=0;j<ps.length;j++){if(ps[j].length>3&&!{state:1,university:1,north:1,south:1}[ps[j]]&&t.indexOf(ps[j])>=0) return g.id;}
+    }
   }
   return null;
 }
