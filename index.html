@@ -935,11 +935,11 @@ function fetchScores(){
       }
       // applyScores handles gameResults + bracketWinners + bet grading
       // using time-based logic only
-          var sample=data.games.slice(0,3).map(function(g){return g.homeTeam+' vs '+g.awayTeam+' final='+g.isFinal+' score='+g.homeScore+'-'+g.awayScore;});
-          var graded=applyScores(data.games);
-          lastScoreFetch=Date.now();
+      var graded=applyScores(data.games);
+      lastScoreFetch=Date.now();
       if(graded>0) saveToStorage();
-      if(graded>0||Object.keys(gameResults).length>0) draw();
+      var hasLive=data.games.some(function(g){return g.isLive;});
+      if(graded>0||hasLive||Object.keys(gameResults).length>0) draw();
     })
     .catch(function(e){console.error('Score fetch error:',e);});
 }
