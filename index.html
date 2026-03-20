@@ -139,7 +139,7 @@ var S={n:"SOUTH",c:"#f97316",round:"R64",g:[
 {id:"s4",s1:4,t1:"Nebraska",s2:13,t2:"Troy",tm:"12:40 PM",tv:"truTV",d:"Thu"},
 {id:"s5",s1:6,t1:"UNC",s2:11,t2:"VCU",tm:"6:50 PM",tv:"TNT",d:"Thu"},
 {id:"s6",s1:3,t1:"Illinois",s2:14,t2:"Penn",tm:"9:25 PM",tv:"TNT",d:"Thu"},
-{id:"s7",s1:7,t1:"St. Mary's",s2:10,t2:"Texas A&amp;M",tm:"7:35 PM",tv:"truTV",d:"Thu"},
+{id:"s7",s1:7,t1:"St. Mary's",s2:10,t2:"Texas A&M",tm:"7:35 PM",tv:"truTV",d:"Thu"},
 {id:"s8",s1:2,t1:"Houston",s2:15,t2:"Idaho",tm:"10:10 PM",tv:"truTV",d:"Thu"}]};
 var W={n:"WEST",c:"#ef4444",round:"R64",g:[
 {id:"w1",s1:1,t1:"Arizona",s2:16,t2:"LIU",tm:"1:35 PM",tv:"TNT",d:"Fri"},
@@ -601,7 +601,7 @@ function buildCenterColumn(){
     var t1strike=sched&&sched.isFinal&&sched.winner&&!teamNamesMatch(sched.winner,t1);
     var t2strike=sched&&sched.isFinal&&sched.winner&&!teamNamesMatch(sched.winner,t2);
     return '<div class="f4" style="border-color:'+borderColor+';text-align:left;padding:10px 14px">'
-      +'<div style="font-size:9px;font-weight:800;color:'+borderColor+';letter-spacing:1px;margin-bottom:6px">FINAL FOUR &mdash; '+label+'</div>'
+      +'<div style="font-size:9px;font-weight:800;color:'+borderColor+';letter-spacing:1px;margin-bottom:6px">FINAL FOUR -- '+label+'</div>'
       +'<div style="font-size:13px;font-weight:700;color:#fbbf24;padding:3px 0'+(t1strike?';opacity:0.38;text-decoration:line-through':'')+'">'+t1+'</div>'
       +'<div style="font-size:13px;font-weight:700;color:'+(t2!='TBD'?'#e2e8f0':'#334155')+';padding:3px 0'+(t2strike?';opacity:0.38;text-decoration:line-through':'')+' ">'+t2+'</div>'
       +badge+timeInfo+'</div>';
@@ -763,6 +763,8 @@ function teamNamesMatch(espnName, ourName){
   if(a.indexOf(b)>=0||b.indexOf(a)>=0) return true;
   // Nickname mappings for teams ESPN uses full names for
   var nicknames={
+    'mich st':'michigan state','michigan state':'mich st',
+    'ohio st':'ohio state','ohio state':'ohio st',
     'unc':'north carolina','north carolina':'unc',
     'ucf':'central florida','central florida':'ucf',
     'uconn':'connecticut','connecticut':'uconn',
@@ -779,13 +781,14 @@ function teamNamesMatch(espnName, ourName){
   };
   if(nicknames[b]&&a.indexOf(nicknames[b])>=0) return true;
   if(nicknames[a]&&b.indexOf(nicknames[a])>=0) return true;
+  // Ambiguous short prefixes that match too broadly - require full word match
   var skip={state:1,university:1,north:1,south:1,east:1,west:1,point:1,tech:1,college:1,the:1,and:1,northern:1,southern:1,eastern:1,western:1,central:1,national:1,saint:1,mount:1};
   var aw=a.split(' ');var bw=b.split(' ');
   for(var i=0;i<aw.length;i++){
-    if(aw[i].length>3&&!skip[aw[i]]&&b.indexOf(aw[i])>=0) return true;
+    if(aw[i].length>4&&!skip[aw[i]]&&b.indexOf(aw[i])>=0) return true;
   }
   for(var i=0;i<bw.length;i++){
-    if(bw[i].length>3&&!skip[bw[i]]&&a.indexOf(bw[i])>=0) return true;
+    if(bw[i].length>4&&!skip[bw[i]]&&a.indexOf(bw[i])>=0) return true;
   }
   return false;
 }
@@ -1071,7 +1074,7 @@ function draw(){
   h+='<span><span class="lb">Total Bets: </span><span class="vl">'+(straightBets.length+parlays.length)+'</span></span>';
   h+='<span><span class="lb">Staked: </span><span class="vl">$'+totalSt.toFixed(2)+'</span></span>';
   h+='<span><span class="lb">Record: </span><span class="vl">'+totalWi+'-'+totalLo+'</span></span>';
-  h+='<span><span class="lb">P&amp;L: </span><span class="vl" style="color:'+plC+'">'+plT+'</span></span>';
+  h+='<span><span class="lb">P&L: </span><span class="vl" style="color:'+plC+'">'+plT+'</span></span>';
   h+='</div></div>';
 
   // Parsing bar
@@ -1101,7 +1104,7 @@ function draw(){
     h+='</div>';
   }else if(lastScoreFetch){
     var sinceMin=Math.round((Date.now()-lastScoreFetch)/60000);
-    h+='<div class="auto-grade-bar" style="background:#06162b;border-bottom-color:#1c2640;color:#475569"> Scores synced &mdash; <span style="margin-left:4px">'+sinceMin+'m ago (updates every 2 min)</span></div>';
+    h+='<div class="auto-grade-bar" style="background:#06162b;border-bottom-color:#1c2640;color:#475569"> Scores synced -- <span style="margin-left:4px">'+sinceMin+'m ago (updates every 2 min)</span></div>';
   }
 
   // Tab bar
@@ -1143,7 +1146,7 @@ function draw(){
     h+=buildRegion(M,true);
     h+='</div>';
     h+='</div></div>';
-    h+='<div class="footer-msg"> Highlighted games have straight bets &mdash; P&amp;L shown per game &mdash; Parlays tracked separately under Parlays tab</div>';
+    h+='<div class="footer-msg"> Highlighted games have straight bets -- P&L shown per game -- Parlays tracked separately under Parlays tab</div>';
 
   }else if(curTab==="straight"){
     h+='<div class="lst">';
@@ -1197,7 +1200,7 @@ function draw(){
 
   }else if(curTab==="parlays"){
     h+='<div class="lst">';
-    h+='<div class="parlay-note">! Game-by-game P&amp;L is only tracked for straight bets. Parlays are tracked here as a single unit &mdash; mark the whole parlay W/L when it settles.</div>';
+    h+='<div class="parlay-note">! Game-by-game P&L is only tracked for straight bets. Parlays are tracked here as a single unit -- mark the whole parlay W/L when it settles.</div>';
     if(!parlays.length){
       h+='<div class="empty-state"><div class="icon"></div><div style="font-size:16px;font-weight:700">No parlays yet</div><div style="font-size:12px;margin-top:8px;color:#334155">Upload a bet slip with a parlay to get started</div></div>';
     }else{
@@ -1224,12 +1227,12 @@ function draw(){
         h+='<div style="display:flex;justify-content:space-between;align-items:center">';
         h+='<div><span style="font-weight:700;font-size:14px;color:#f97316">'+legCount+'-Leg Parlay</span>';
         h+='<span style="color:#64748b;font-size:11px;margin-left:6px">'+p.sportsbook+'</span></div>';
-        h+='<div style="font-weight:700">$'+(p.stake||0).toFixed(2)+' &rarr; $'+(p.potentialPayout||0).toFixed(2)+'</div></div>';
+        h+='<div style="font-weight:700">$'+(p.stake||0).toFixed(2)+' -> $'+(p.potentialPayout||0).toFixed(2)+'</div></div>';
         if(p.legs&&p.legs.length){
           h+='<div class="parlay-legs">';
           for(var j=0;j<p.legs.length;j++){
             var leg=p.legs[j];
-            h+='<div class="leg"><span class="leg-dot"></span><span style="color:#fbbf24;font-weight:600">'+(leg.team||"?")+'</span>&nbsp;<span style="color:#64748b">'+(leg.betType||"")+'</span>&nbsp;<span style="color:#94a3b8">'+(leg.odds||"")+'</span></div>';
+            h+='<div class="leg"><span class="leg-dot"></span><span style="color:#fbbf24;font-weight:600">'+(leg.team||"?")+'</span> <span style="color:#64748b">'+(leg.betType||"")+'</span> <span style="color:#94a3b8">'+(leg.odds||"")+'</span></div>';
           }
           h+='</div>';
         }
@@ -1287,10 +1290,10 @@ function draw(){
     h+='<div class="dz-icon">+</div>';
     h+='<div class="dz-title">Drop bet slips here</div>';
     h+='<div class="dz-sub">or click to browse files</div>';
-    h+='<div class="dz-sub" style="margin-top:6px;color:#334155">Supports DraftKings, FanDuel, BetMGM, ProphetX, Caesars &amp; more</div>';
+    h+='<div class="dz-sub" style="margin-top:6px;color:#334155">Supports DraftKings, FanDuel, BetMGM, ProphetX, Caesars & more</div>';
     h+='</label>';
     h+='</div>';
-    h+='<div style="font-size:11px;color:#475569;text-align:center">Multiple files supported &mdash; AI reads your slips automatically</div>';
+    h+='<div style="font-size:11px;color:#475569;text-align:center">Multiple files supported -- AI reads your slips automatically</div>';
     h+='</div></div>';
   }
 
