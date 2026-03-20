@@ -788,7 +788,7 @@ function teamNamesMatch(espnName, ourName){
   if(nicknames[b]&&a.indexOf(nicknames[b])>=0) return true;
   if(nicknames[a]&&b.indexOf(nicknames[a])>=0) return true;
   // Ambiguous short prefixes that match too broadly - require full word match
-  var skip={state:1,university:1,north:1,south:1,east:1,west:1,point:1,tech:1,college:1,the:1,and:1,northern:1,southern:1,eastern:1,western:1,central:1,national:1,saint:1,mount:1};
+  var skip={state:1,university:1,north:1,south:1,east:1,west:1,point:1,tech:1,college:1,the:1,and:1,northern:1,southern:1,eastern:1,western:1,central:1,national:1,saint:1,mount:1,florida:1,carolina:1,illinois:1,georgia:1,virginia:1,michigan:1,kansas:1,texas:1,iowa:1,ohio:1};
   var aw=a.split(' ');var bw=b.split(' ');
   for(var i=0;i<aw.length;i++){
     if(aw[i].length>4&&!skip[aw[i]]&&b.indexOf(aw[i])>=0) return true;
