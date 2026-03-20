@@ -682,6 +682,7 @@ function buildRegion(reg,rev){
   for(var i=0;i<4;i++){
     var w1=bracketWinners[g[i*2].id]||null;
     var w2=bracketWinners[g[i*2+1].id]||null;
+    console.log("R32 slot",i,"g1:",g[i*2].id,"w1:",w1,"g2:",g[i*2+1].id,"w2:",w2);
     var sched=w1&&w2?findEspnScheduled(w1,w2):null;
     r2+=liveSlot(g[i*2].id,g[i*2+1].id,'Round of 32',sched);
     c1+=connSvg(rev);
