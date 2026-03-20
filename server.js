@@ -44,6 +44,7 @@ app.get('/api/scores', async (req, res) => {
         isLive,
         statusText: status.type.shortDetail || status.type.description,
         winner,
+        gameDate: event.date || '',
         round: (event.competitions[0].notes || []).length > 0
           ? event.competitions[0].notes[0].headline
           : ''

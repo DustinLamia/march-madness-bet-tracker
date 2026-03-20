@@ -399,9 +399,11 @@ function liveSlot(g1id,g2id,round,espnScheduled){
   var w1=bracketWinners[g1id]||null;
   var w2=bracketWinners[g2id]||null;
   if(!w1&&!w2) return slot(round);
-  var gr=espnScheduled||null;
-  var cls="gm";
   var t1=abbr(w1)||'TBD';var t2=abbr(w2)||'TBD';
+  // Only show live/final status if BOTH teams have advanced from R64
+  // This prevents ESPN pre-seeded future games from showing as final
+  var bothAdvanced=w1&&w2;
+  var gr=bothAdvanced?(espnScheduled||null):null;
   var statusBadge="";var timeInfo="";
   if(gr&&gr.isFinal) statusBadge='<span class="gm-final">FINAL</span>';
   else if(gr&&gr.isLive) statusBadge='<span class="gm-live">LIVE</span>';
@@ -411,8 +413,8 @@ function liveSlot(g1id,g2id,round,espnScheduled){
   var t2strike=gr&&gr.isFinal&&gr.winner&&!teamNamesMatch(gr.winner,w2||"");
   var t1d=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
-  return '<div class="'+cls+'">'
-    +'<div class="tr"><span class="tn'+(w1?' bt':'')+ '">'+t1d+'</span>'+statusBadge+'</div>'
+  return '<div class="gm">'
+    +'<div class="tr"><span class="tn'+(w1?' bt':'')+'">'+t1d+'</span>'+statusBadge+'</div>'
     +'<div class="tr"><span class="tn" style="color:'+(w2?'#e2e8f0':'#334155')+'">'+t2d+'</span>'+timeInfo+'</div>'
     +'</div>';
 }
@@ -585,8 +587,8 @@ function buildRegion(reg,rev){
       var sbadge='';var stimeInfo='';
       if(ssched&&ssched.tm) stimeInfo='<span class="tm-t">'+ssched.d+' '+ssched.tm+' '+ssched.tv+'</span>';
       else if(sw1&&sw2) stimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
-      if(ssched&&ssched.isFinal) sbadge='<span class="gm-final">FINAL</span>';
-      else if(ssched&&ssched.isLive) sbadge='<span class="gm-live">LIVE</span>';
+      if(ssched&&ssched.isFinal&&sw1&&sw2) sbadge='<span class="gm-final">FINAL</span>';
+      else if(ssched&&ssched.isLive&&sw1&&sw2) sbadge='<span class="gm-live">LIVE</span>';
       r3+='<div class="gm">'
         +'<div class="tr"><span class="tn'+(sw1?' bt':'')+'">'+st1+'</span>'+sbadge+'</div>'
         +'<div class="tr"><span class="tn" style="color:'+(sw2?'#e2e8f0':'#334155')+'">'+st2+'</span>'+stimeInfo+'</div>'
@@ -609,8 +611,8 @@ function buildRegion(reg,rev){
     var ebadge='';var etimeInfo='';
     if(esched&&esched.tm) etimeInfo='<span class="tm-t">'+esched.d+' '+esched.tm+' '+esched.tv+'</span>';
     else if(e1&&e2) etimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
-    if(esched&&esched.isFinal) ebadge='<span class="gm-final">FINAL</span>';
-    else if(esched&&esched.isLive) ebadge='<span class="gm-live">LIVE</span>';
+    if(esched&&esched.isFinal&&e1&&e2) ebadge='<span class="gm-final">FINAL</span>';
+    else if(esched&&esched.isLive&&e1&&e2) ebadge='<span class="gm-live">LIVE</span>';
     r4='<div class="gm">'
       +'<div class="tr"><span class="tn'+(e1?' bt':'')+'">'+et1+'</span>'+ebadge+'</div>'
       +'<div class="tr"><span class="tn" style="color:'+(e2?'#e2e8f0':'#334155')+'">'+et2+'</span>'+etimeInfo+'</div>'
@@ -770,7 +772,10 @@ function fetchScores(){
         var eg=data.games[i];
         var key=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
         var hs=parseInt(eg.homeScore)||0;var as=parseInt(eg.awayScore)||0;
-        var realGame=eg.isFinal&&(hs>0||as>0);
+        var hasRealScore=(hs+as)>10;
+        // Only treat as final if game date is in the past AND scores are real
+        var gameDatePast=eg.gameDate?new Date(eg.gameDate)<new Date():false;
+        var realGame=eg.isFinal&&hasRealScore&&gameDatePast;
         espnScheduled[key]={
           homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
           tm:eg.statusText||'',tv:'',d:'',
