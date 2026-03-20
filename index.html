@@ -517,12 +517,18 @@ function buildCenterColumn(){
 }
 
 function findEspnScheduled(t1,t2){
-  // Look up a scheduled later-round game by team names
   for(var k in espnScheduled){
     var eg=espnScheduled[k];
     if(!eg.homeTeam||!eg.awayTeam) continue;
     if((teamNamesMatch(eg.homeTeam,t1)||teamNamesMatch(eg.awayTeam,t1))&&
-       (teamNamesMatch(eg.homeTeam,t2)||teamNamesMatch(eg.awayTeam,t2))) return eg;
+       (teamNamesMatch(eg.homeTeam,t2)||teamNamesMatch(eg.awayTeam,t2))){
+      // Never return a winner unless the game is truly final with real scores
+      var safe=JSON.parse(JSON.stringify(eg));
+      if(!safe.isFinal||(parseInt(safe.homeScore)||0)===0&&(parseInt(safe.awayScore)||0)===0){
+        safe.winner=null;
+      }
+      return safe;
+    }
   }
   return null;
 }
@@ -689,24 +695,32 @@ function applyScores(games){
     var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
     if(!gid) continue;
 
-    gameResults[gid]={
-      isFinal:eg.isFinal,
-      isLive:eg.isLive,
-      winner:eg.winner,
-      statusText:eg.statusText,
-      homeTeam:eg.homeTeam,
-      awayTeam:eg.awayTeam,
-      homeScore:eg.homeScore,
-      awayScore:eg.awayScore
-    };
-
+    // Only update gameResults for R64 games to avoid future round contamination
+    var isR64game=false;
+    for(var ri=0;ri<flat.length;ri++){if(flat[ri].id===gid&&flat[ri].round==="R64"){isR64game=true;break;}}
+    if(isR64game){
+      var hs0=parseInt(eg.homeScore)||0;var as0=parseInt(eg.awayScore)||0;
+      gameResults[gid]={
+        isFinal:eg.isFinal&&(hs0>0||as0>0),
+        isLive:eg.isLive,
+        winner:eg.isFinal&&eg.winner?eg.winner:null,
+        statusText:eg.statusText,
+        homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
+        homeScore:eg.homeScore,awayScore:eg.awayScore
+      };
+    }
+    // Only advance bracket if game is truly final with a real score
     if(!eg.isFinal||!eg.winner) continue;
+    // Sanity check: both scores must be non-zero numbers
+    var hs=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
+    if(hs===0&&as2===0) continue;
     bracketWinners[gid]=eg.winner;
 
     for(var j=0;j<straightBets.length;j++){
       var b=straightBets[j];
       if(b.assignedGame!==gid) continue;
       if(b.result) continue;
+      if(b.manuallyUngraded) continue;
       if(!b.team) continue;
 
       var bt=(b.betType||'').toLowerCase();
@@ -741,15 +755,41 @@ function fetchScores(){
     .then(function(r){return r.json();})
     .then(function(data){
       if(!data.games) return;
-      // Store all games for later round scheduling
+      // Store ALL games in espnScheduled for later-round scheduling info
+      // But only mark as final/live if scores are real (non-zero)
       for(var i=0;i<data.games.length;i++){
         var eg=data.games[i];
         var key=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
+        var hs=parseInt(eg.homeScore)||0;var as=parseInt(eg.awayScore)||0;
+        var realGame=eg.isFinal&&(hs>0||as>0);
         espnScheduled[key]={
           homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
           tm:eg.statusText||'',tv:'',d:'',
-          isFinal:eg.isFinal,isLive:eg.isLive,
-          winner:eg.winner,
+          isFinal:realGame,
+          isLive:eg.isLive&&(hs>0||as>0),
+          winner:realGame&&eg.winner?eg.winner:null,
+          homeScore:eg.homeScore,awayScore:eg.awayScore
+        };
+      }
+      // CRITICAL: only update gameResults for our known R64 games
+      // This prevents future round ESPN games from showing FINAL on R64 cards
+      for(var i=0;i<data.games.length;i++){
+        var eg=data.games[i];
+        var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
+        if(!gid) continue;
+        // Only update gameResults if this is a known R64 game in our flat[] array
+        var isR64=false;
+        for(var j=0;j<flat.length;j++){
+          if(flat[j].id===gid&&flat[j].round==='R64'){isR64=true;break;}
+        }
+        if(!isR64) continue;
+        var hs2=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
+        gameResults[gid]={
+          isFinal:eg.isFinal&&(hs2>0||as2>0),
+          isLive:eg.isLive,
+          winner:eg.isFinal&&eg.winner?eg.winner:null,
+          statusText:eg.statusText,
+          homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
           homeScore:eg.homeScore,awayScore:eg.awayScore
         };
       }
@@ -980,7 +1020,7 @@ function draw(){
         if(!b.result){
           btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'
             +'<span style="font-size:11px;color:#475569">Pending — will auto-grade when game goes final</span>'
-            +'<button onclick="deleteBet(\"'+b.id+'\",\'straight\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px">Delete</button>'
+            +'<button onclick="deleteBet(this.getAttribute(\'data-id\'),\'straight\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px" data-id='+b.id+'>Delete</button>'
             +'</div>';
         }else{
           var xc=b.result==="win"?"#10b981":b.result==="loss"?"#ef4444":"#f59e0b";
@@ -989,7 +1029,7 @@ function draw(){
             +'<span style="font-weight:700;font-size:14px;color:'+xc+'">'+( bp>=0?"+":"")+'$'+Math.abs(bp).toFixed(2)+gradedBy+'</span>'
             +'<div style="display:flex;gap:5px">'
             +'<button class="rbt" data-r="undo" data-b="'+b.id+'" data-type="straight" style="background:#1e293b;flex:0;padding:4px 8px;font-size:10px">Undo Grade</button>'
-            +'<button onclick="deleteBet(\"'+b.id+'\",\' straight\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px">Delete</button>'
+            +'<button onclick="deleteBet(this.getAttribute(\'data-id\'),\'straight\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px" data-id='+b.id+'>Delete</button>'
             +'</div></div>';
         }
         h+='<div class="bi" style="border-left-color:'+(g?g.rc:"#00b4d8")+'">'
@@ -1035,7 +1075,12 @@ function draw(){
           btns+='<button class="rbt" data-r="push" data-b="'+p.id+'" data-type="parlay" style="background:#f59e0b">PUSH</button></div>';
         }else{
           var xc=p.result==="win"?"#10b981":p.result==="loss"?"#ef4444":"#f59e0b";
-          btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px"><span style="font-weight:700;font-size:14px;color:'+xc+'">'+(pp>=0?"+":"")+'$'+Math.abs(pp).toFixed(2)+'</span><button class="rbt" data-r="undo" data-b="'+p.id+'" data-type="parlay" style="background:#1e293b;flex:0;padding:4px 10px;font-size:10px">Undo</button></div>';
+          btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'
+            +'<span style="font-weight:700;font-size:14px;color:'+xc+'">'+( pp>=0?"+":"")+'$'+Math.abs(pp).toFixed(2)+'</span>'
+            +'<div style="display:flex;gap:5px">'
+            +'<button class="rbt" data-r="undo" data-b="'+p.id+'" data-type="parlay" style="background:#1e293b;flex:0;padding:4px 8px;font-size:10px">Undo</button>'
+            +'<button onclick="deleteBet(this.getAttribute(\'data-id\'),\'parlay\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px" data-id='+p.id+'>Delete</button>'
+            +'</div></div>';
         }
         var legCount=p.legs?p.legs.length:0;
         h+='<div class="pi">';
@@ -1242,7 +1287,11 @@ function bindEvents(){
       var btype=el.getAttribute("data-type");
       var arr=btype==="parlay"?parlays:straightBets;
       for(var i=0;i<arr.length;i++){
-        if(arr[i].id===bid){arr[i].result=rv==="undo"?null:rv;break;}
+        if(arr[i].id===bid){
+          if(rv==="undo"){arr[i].result=null;arr[i].autoGraded=false;arr[i].manuallyUngraded=true;}
+          else{arr[i].result=rv;arr[i].manuallyUngraded=false;}
+          break;
+        }
       }
       draw();
     }
