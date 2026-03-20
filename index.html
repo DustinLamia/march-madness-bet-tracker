@@ -507,6 +507,7 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
 
   // Bets assigned to this R32 slot via espnScheduled key
+  console.log("liveSlot eg:",eg&&eg.homeTeam,eg&&eg.awayTeam,"k1/k2:",eg?(eg.homeTeam+"_"+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,""):"null");
   var slotBets=[];
   if(eg){
     var k1=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
