@@ -190,6 +190,32 @@ var laterRounds=[
 ];
 for(var i=0;i<laterRounds.length;i++) flat.push(laterRounds[i]);
 
+// Map game day abbreviations to real 2026 dates
+var GAME_DATES={
+  "Thu":"2026-03-19", // Thursday March 19 (games start Mar 19)
+  "Fri":"2026-03-20"  // Friday March 20
+};
+
+// Build a real timestamp for each R64 game (tip time + 3 hours = grade time)
+// Returns ms timestamp after which we trust the result
+function getGradeTime(game){
+  var dateStr=GAME_DATES[game.d];
+  if(!dateStr||!game.tm) return null;
+  // Parse time like "2:50 PM" or "12:15 PM"
+  var m=game.tm.match(/(\d+):(\d+)\s*(AM|PM)/i);
+  if(!m) return null;
+  var hrs=parseInt(m[1]);var mins=parseInt(m[2]);var ampm=m[3].toUpperCase();
+  if(ampm==="PM"&&hrs!==12) hrs+=12;
+  if(ampm==="AM"&&hrs===12) hrs=0;
+  // All times shown are Eastern — convert to UTC (ET = UTC-4 during DST in March)
+  var etOffsetHours=4;
+  var utcHrs=hrs+etOffsetHours;
+  var d=new Date(dateStr+"T00:00:00Z");
+  d.setUTCHours(utcHrs,mins,0,0);
+  // Grade time = tip time + 3 hours
+  return d.getTime()+(3*60*60*1000);
+}
+
 var straightBets=[];
 var parlays=[];
 var logz=[];
@@ -395,22 +421,22 @@ function connSvg(rev){
   return h+'</svg></div>';
 }
 
-function liveSlot(g1id,g2id,round,espnScheduled){
+function liveSlot(g1id,g2id,round,espnSched){
   var w1=bracketWinners[g1id]||null;
   var w2=bracketWinners[g2id]||null;
+  // Always show slot if at least one winner is known
   if(!w1&&!w2) return slot(round);
-  var t1=abbr(w1)||'TBD';var t2=abbr(w2)||'TBD';
-  // Only show live/final status if BOTH teams have advanced from R64
-  // This prevents ESPN pre-seeded future games from showing as final
-  var bothAdvanced=w1&&w2;
-  var gr=bothAdvanced?(espnScheduled||null):null;
+  var t1=w1?abbr(w1):'TBD';
+  var t2=w2?abbr(w2):'TBD';
+  // Only use ESPN game data if BOTH teams have advanced AND game date has passed
+  var gr=(w1&&w2&&espnSched&&espnSched.isFinal)?espnSched:null;
   var statusBadge="";var timeInfo="";
   if(gr&&gr.isFinal) statusBadge='<span class="gm-final">FINAL</span>';
-  else if(gr&&gr.isLive) statusBadge='<span class="gm-live">LIVE</span>';
-  if(gr&&gr.tm) timeInfo='<span class="tm-t">'+gr.d+' '+gr.tm+'</span>';
+  else if(espnSched&&espnSched.isLive&&w1&&w2) statusBadge='<span class="gm-live">LIVE</span>';
+  if(espnSched&&espnSched.tm&&w1&&w2) timeInfo='<span class="tm-t">'+espnSched.tm+'</span>';
   else if(w1&&w2) timeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
-  var t1strike=gr&&gr.isFinal&&gr.winner&&!teamNamesMatch(gr.winner,w1||"");
-  var t2strike=gr&&gr.isFinal&&gr.winner&&!teamNamesMatch(gr.winner,w2||"");
+  var t1strike=gr&&gr.winner&&!teamNamesMatch(gr.winner,w1||"");
+  var t2strike=gr&&gr.winner&&!teamNamesMatch(gr.winner,w2||"");
   var t1d=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
   return '<div class="gm">'
@@ -700,32 +726,48 @@ function gradeSpread(betType, team, homeTeam, awayTeam, homeScore, awayScore){
 }
 
 function applyScores(games){
+  var now=Date.now();
   var newGrades=0;
   for(var i=0;i<games.length;i++){
     var eg=games[i];
     var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
     if(!gid) continue;
 
-    // Only update gameResults for R64 games to avoid future round contamination
-    var isR64game=false;
-    for(var ri=0;ri<flat.length;ri++){if(flat[ri].id===gid&&flat[ri].round==="R64"){isR64game=true;break;}}
-    if(isR64game){
+    // Find the flat game entry
+    var flatGame=null;
+    for(var ri=0;ri<flat.length;ri++){if(flat[ri].id===gid){flatGame=flat[ri];break;}}
+    var isR64=flatGame&&flatGame.round==="R64";
+
+    // Always update gameResults for live scoring display
+    if(isR64){
       var hs0=parseInt(eg.homeScore)||0;var as0=parseInt(eg.awayScore)||0;
-      gameResults[gid]={
-        isFinal:eg.isFinal&&(hs0>0||as0>0),
-        isLive:eg.isLive,
-        winner:eg.isFinal&&eg.winner?eg.winner:null,
-        statusText:eg.statusText,
-        homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
-        homeScore:eg.homeScore,awayScore:eg.awayScore
-      };
+      if(!gameResults[gid]) gameResults[gid]={};
+      gameResults[gid].isLive=eg.isLive;
+      gameResults[gid].statusText=eg.statusText;
+      gameResults[gid].homeTeam=eg.homeTeam;
+      gameResults[gid].awayTeam=eg.awayTeam;
+      gameResults[gid].homeScore=eg.homeScore;
+      gameResults[gid].awayScore=eg.awayScore;
+      // Only set isFinal and winner via time-based check below
     }
-    // Only advance bracket if game is truly final with a real score
-    if(!eg.isFinal||!eg.winner) continue;
-    // Sanity check: both scores must be non-zero numbers
+
+    // TIME-BASED GRADING: only grade/advance if 3hrs past scheduled tip
+    var gradeTime=flatGame?getGradeTime(flatGame):null;
+    var timeOk=gradeTime?now>gradeTime:false;
+
+    // Fallback: also accept if ESPN says final AND scores are real (safety net)
     var hs=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
-    if(hs===0&&as2===0) continue;
-    bracketWinners[gid]=eg.winner;
+    var hasRealScore=(hs+as2)>10;
+    var espnFinal=eg.isFinal&&hasRealScore&&eg.winner;
+    if(!timeOk&&!espnFinal) continue;
+    if(!eg.winner) continue;
+
+    // Confirmed result — update gameResults, advance bracket, grade bets
+    if(isR64){
+      gameResults[gid].isFinal=true;
+      gameResults[gid].winner=eg.winner;
+    }
+    if(!bracketWinners[gid]) bracketWinners[gid]=eg.winner;
 
     for(var j=0;j<straightBets.length;j++){
       var b=straightBets[j];
@@ -733,29 +775,17 @@ function applyScores(games){
       if(b.result) continue;
       if(b.manuallyUngraded) continue;
       if(!b.team) continue;
-
-      var bt=(b.betType||'').toLowerCase();
+      var bt=(b.betType||"").toLowerCase();
       var result=null;
-
-      if(bt.indexOf('total')>=0||bt.indexOf('over')>=0||bt.indexOf('under')>=0){
-        // Total bet — grade by combined score
+      if(bt.indexOf("total")>=0||bt.indexOf("over")>=0||bt.indexOf("under")>=0){
         result=gradeTotal(b.betType,eg.homeScore,eg.awayScore);
-      }else if(bt.indexOf('spread')>=0||bt.indexOf('-')>=0||bt.indexOf('+')>=0){
-        // Spread bet — grade by margin
+      }else if(bt.indexOf("spread")>=0||extractNumber(b.betType)!==null){
         result=gradeSpread(b.betType,b.team,eg.homeTeam,eg.awayTeam,eg.homeScore,eg.awayScore);
-        // Fallback to moneyline if spread parse fails
-        if(!result) result=teamNamesMatch(eg.winner,b.team)?'win':'loss';
+        if(!result) result=teamNamesMatch(eg.winner,b.team)?"win":"loss";
       }else{
-        // Moneyline
-        result=teamNamesMatch(eg.winner,b.team)?'win':'loss';
+        result=teamNamesMatch(eg.winner,b.team)?"win":"loss";
       }
-
-      if(result){
-        b.result=result;
-        b.autoGraded=true;
-        newGrades++;
-        autoGradeLog.push({team:b.team,result:b.result,game:gid});
-      }
+      if(result){b.result=result;b.autoGraded=true;newGrades++;autoGradeLog.push({team:b.team,result:b.result,game:gid});}
     }
   }
   return newGrades;
