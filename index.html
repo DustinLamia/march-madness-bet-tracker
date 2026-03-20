@@ -201,19 +201,17 @@ var GAME_DATES={
 function getGradeTime(game){
   var dateStr=GAME_DATES[game.d];
   if(!dateStr||!game.tm) return null;
-  // Parse time like "2:50 PM" or "12:15 PM"
   var m=game.tm.match(/(\d+):(\d+)\s*(AM|PM)/i);
   if(!m) return null;
   var hrs=parseInt(m[1]);var mins=parseInt(m[2]);var ampm=m[3].toUpperCase();
   if(ampm==="PM"&&hrs!==12) hrs+=12;
   if(ampm==="AM"&&hrs===12) hrs=0;
-  // All times shown are Eastern — convert to UTC (ET = UTC-4 during DST in March)
-  var etOffsetHours=4;
-  var utcHrs=hrs+etOffsetHours;
-  var d=new Date(dateStr+"T00:00:00Z");
-  d.setUTCHours(utcHrs,mins,0,0);
-  // Grade time = tip time + 3 hours
-  return d.getTime()+(3*60*60*1000);
+  // ET = UTC-4 during DST (March)
+  // Use Date object to handle midnight overflow correctly
+  var d=new Date(dateStr+"T00:00:00-04:00");
+  d.setHours(hrs,mins,0,0);
+  // Grade time = tip time + 3.5 hours (extra buffer)
+  return d.getTime()+(3.5*60*60*1000);
 }
 
 var straightBets=[];
@@ -732,49 +730,38 @@ function applyScores(games){
     var eg=games[i];
     var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
     if(!gid) continue;
-
-    // Find the flat game entry
     var flatGame=null;
     for(var ri=0;ri<flat.length;ri++){if(flat[ri].id===gid){flatGame=flat[ri];break;}}
     var isR64=flatGame&&flatGame.round==="R64";
+    if(!isR64) continue; // only process R64 games here
 
-    // Always update gameResults for live scoring display
-    if(isR64){
-      var hs0=parseInt(eg.homeScore)||0;var as0=parseInt(eg.awayScore)||0;
-      if(!gameResults[gid]) gameResults[gid]={};
-      gameResults[gid].isLive=eg.isLive;
-      gameResults[gid].statusText=eg.statusText;
-      gameResults[gid].homeTeam=eg.homeTeam;
-      gameResults[gid].awayTeam=eg.awayTeam;
-      gameResults[gid].homeScore=eg.homeScore;
-      gameResults[gid].awayScore=eg.awayScore;
-      // Only set isFinal and winner via time-based check below
-    }
-
-    // TIME-BASED GRADING: only grade/advance if 3hrs past scheduled tip
-    var gradeTime=flatGame?getGradeTime(flatGame):null;
-    var timeOk=gradeTime?now>gradeTime:false;
-
-    // Fallback: also accept if ESPN says final AND scores are real (safety net)
     var hs=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
-    var hasRealScore=(hs+as2)>10;
-    var espnFinal=eg.isFinal&&hasRealScore&&eg.winner;
-    if(!timeOk&&!espnFinal) continue;
-    if(!eg.winner) continue;
+    var hasScore=hs>0||as2>0;
 
-    // Confirmed result — update gameResults, advance bracket, grade bets
-    if(isR64){
-      gameResults[gid].isFinal=true;
-      gameResults[gid].winner=eg.winner;
-    }
+    // Always update live display data
+    if(!gameResults[gid]) gameResults[gid]={};
+    gameResults[gid].isLive=eg.isLive&&hasScore;
+    gameResults[gid].statusText=eg.statusText;
+    gameResults[gid].homeTeam=eg.homeTeam;
+    gameResults[gid].awayTeam=eg.awayTeam;
+    gameResults[gid].homeScore=eg.homeScore;
+    gameResults[gid].awayScore=eg.awayScore;
+
+    // Grade/advance ONLY if 3 hours past scheduled tip time
+    var gradeTime=getGradeTime(flatGame);
+    if(!gradeTime) continue;
+    if(now<=gradeTime) continue; // not enough time has passed
+    if(!eg.winner) continue; // no winner from ESPN yet
+    if(!hasScore) continue; // no real score data
+
+    // Confirmed — set final, advance bracket, grade bets
+    gameResults[gid].isFinal=true;
+    gameResults[gid].winner=eg.winner;
     if(!bracketWinners[gid]) bracketWinners[gid]=eg.winner;
 
     for(var j=0;j<straightBets.length;j++){
       var b=straightBets[j];
-      if(b.assignedGame!==gid) continue;
-      if(b.result) continue;
-      if(b.manuallyUngraded) continue;
-      if(!b.team) continue;
+      if(b.assignedGame!==gid||b.result||b.manuallyUngraded||!b.team) continue;
       var bt=(b.betType||"").toLowerCase();
       var result=null;
       if(bt.indexOf("total")>=0||bt.indexOf("over")>=0||bt.indexOf("under")>=0){
@@ -785,7 +772,7 @@ function applyScores(games){
       }else{
         result=teamNamesMatch(eg.winner,b.team)?"win":"loss";
       }
-      if(result){b.result=result;b.autoGraded=true;newGrades++;autoGradeLog.push({team:b.team,result:b.result,game:gid});}
+      if(result){b.result=result;b.autoGraded=true;newGrades++;saveToStorage();autoGradeLog.push({team:b.team,result:b.result,game:gid});}
     }
   }
   return newGrades;
@@ -796,47 +783,24 @@ function fetchScores(){
     .then(function(r){return r.json();})
     .then(function(data){
       if(!data.games) return;
-      // Store ALL games in espnScheduled for later-round scheduling info
-      // But only mark as final/live if scores are real (non-zero)
+      // Store all ESPN games for later-round scheduling display only
+      // isFinal/winner in espnScheduled is NOT used for R64 grading
       for(var i=0;i<data.games.length;i++){
         var eg=data.games[i];
         var key=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
         var hs=parseInt(eg.homeScore)||0;var as=parseInt(eg.awayScore)||0;
         var hasRealScore=(hs+as)>10;
-        // Only treat as final if game date is in the past AND scores are real
-        var gameDatePast=eg.gameDate?new Date(eg.gameDate)<new Date():false;
-        var realGame=eg.isFinal&&hasRealScore&&gameDatePast;
         espnScheduled[key]={
           homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
           tm:eg.statusText||'',tv:'',d:'',
-          isFinal:realGame,
-          isLive:eg.isLive&&(hs>0||as>0),
-          winner:realGame&&eg.winner?eg.winner:null,
+          isFinal:eg.isFinal&&hasRealScore,
+          isLive:eg.isLive&&hasScore,
+          winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
           homeScore:eg.homeScore,awayScore:eg.awayScore
         };
       }
-      // CRITICAL: only update gameResults for our known R64 games
-      // This prevents future round ESPN games from showing FINAL on R64 cards
-      for(var i=0;i<data.games.length;i++){
-        var eg=data.games[i];
-        var gid=findGameByTeams(eg.homeTeam,eg.awayTeam);
-        if(!gid) continue;
-        // Only update gameResults if this is a known R64 game in our flat[] array
-        var isR64=false;
-        for(var j=0;j<flat.length;j++){
-          if(flat[j].id===gid&&flat[j].round==='R64'){isR64=true;break;}
-        }
-        if(!isR64) continue;
-        var hs2=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
-        gameResults[gid]={
-          isFinal:eg.isFinal&&(hs2>0||as2>0),
-          isLive:eg.isLive,
-          winner:eg.isFinal&&eg.winner?eg.winner:null,
-          statusText:eg.statusText,
-          homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
-          homeScore:eg.homeScore,awayScore:eg.awayScore
-        };
-      }
+      // applyScores handles gameResults + bracketWinners + bet grading
+      // using time-based logic only
       var graded=applyScores(data.games);
       lastScoreFetch=Date.now();
       if(graded>0||Object.keys(gameResults).length>0) draw();
