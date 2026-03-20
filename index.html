@@ -864,9 +864,10 @@ function applyScores(games){
     var hs=parseInt(eg.homeScore)||0;var as2=parseInt(eg.awayScore)||0;
     var hasScore=hs>0||as2>0;
 
-    // Always update live display data
+    // Always update live display data regardless of grade time
     if(!gameResults[gid]) gameResults[gid]={};
     gameResults[gid].isLive=eg.isLive&&hasScore;
+    gameResults[gid].isFinal=gameResults[gid].isFinal||false;
     gameResults[gid].statusText=eg.statusText;
     gameResults[gid].homeTeam=eg.homeTeam;
     gameResults[gid].awayTeam=eg.awayTeam;
@@ -938,8 +939,7 @@ function fetchScores(){
       var graded=applyScores(data.games);
       lastScoreFetch=Date.now();
       if(graded>0) saveToStorage();
-      var hasLive=data.games.some(function(g){return g.isLive;});
-      if(graded>0||hasLive||Object.keys(gameResults).length>0) draw();
+      draw(); // always redraw after score fetch
     })
     .catch(function(e){console.error('Score fetch error:',e);});
 }
