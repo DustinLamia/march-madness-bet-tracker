@@ -283,16 +283,19 @@ function saveToStorage(){
   try{
     localStorage.setItem('mmbt_straight',JSON.stringify(straightBets));
     localStorage.setItem('mmbt_parlays',JSON.stringify(parlays));
-  }catch(e){console.warn('Save failed:',e);}
+    localStorage.setItem('mmbt_winners',JSON.stringify(bracketWinners));
+  }catch(e){}
 }
 
 function loadFromStorage(){
   try{
     var s=localStorage.getItem('mmbt_straight');
     var p=localStorage.getItem('mmbt_parlays');
+    var w=localStorage.getItem('mmbt_winners');
     if(s) straightBets=JSON.parse(s);
     if(p) parlays=JSON.parse(p);
-  }catch(e){console.warn('Load failed:',e);}
+    if(w) bracketWinners=JSON.parse(w);
+  }catch(e){}
 }
 
 function clearStorage(){
@@ -897,6 +900,7 @@ function fetchScores(){
       // using time-based logic only
       var graded=applyScores(data.games);
       lastScoreFetch=Date.now();
+      if(graded>0) saveToStorage();
       if(graded>0||Object.keys(gameResults).length>0) draw();
     })
     .catch(function(){});
