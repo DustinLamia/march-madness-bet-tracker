@@ -472,7 +472,6 @@ function connSvg(rev){
 function liveSlot(g1id,g2id,round,espnSched){
   var w1=bracketWinners[g1id]||null;
   var w2=bracketWinners[g2id]||null;
-  console.log("liveSlot called:",g1id,"w1:",w1,g2id,"w2:",w2);
   if(!w1&&!w2) return slot(round);
   var t1=w1?abbr(w1):'TBD';
   var t2=w2?abbr(w2):'TBD';
@@ -507,14 +506,18 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t1d=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
 
-  // Bets assigned to this R32 slot via espnScheduled key
+  // Bets assigned to this R32 slot — match by team names, not exact key
   var slotBets=[];
-  if(eg){
-    var k1=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
-    var k2=(eg.awayTeam+'_'+eg.homeTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
+  if(w1&&w2){
     for(var si=0;si<straightBets.length;si++){
       var sb=straightBets[si];
-      if(sb.assignedGame===k1||sb.assignedGame===k2) slotBets.push(sb);
+      if(!sb.assignedGame) continue;
+      // Check if this bet's assignedGame key contains both team name fragments
+      var ag=sb.assignedGame.toLowerCase();
+      // Try matching against w1 and w2 core names
+      var w1core=w1.toLowerCase().replace(/[^a-z0-9]/g,'').substring(0,8);
+      var w2core=w2.toLowerCase().replace(/[^a-z0-9]/g,'').substring(0,8);
+      if(ag.indexOf(w1core)>=0&&ag.indexOf(w2core)>=0) slotBets.push(sb);
     }
   }
   var betStrip="";
@@ -934,7 +937,6 @@ function fetchScores(){
       // using time-based logic only
           var sample=data.games.slice(0,3).map(function(g){return g.homeTeam+' vs '+g.awayTeam+' final='+g.isFinal+' score='+g.homeScore+'-'+g.awayScore;});
           var graded=applyScores(data.games);
-          console.log('winners:',JSON.stringify(bracketWinners));
           lastScoreFetch=Date.now();
       if(graded>0) saveToStorage();
       if(graded>0||Object.keys(gameResults).length>0) draw();
