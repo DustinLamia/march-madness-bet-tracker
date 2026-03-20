@@ -269,7 +269,10 @@ function isPropBet(b){
   var bt=(b.betType||"").toLowerCase();
   return bt.indexOf("prop")>=0||bt.indexOf("points")>=0||bt.indexOf("assists")>=0||bt.indexOf("rebounds")>=0||bt.indexOf("threes")>=0||bt.indexOf("blocks")>=0||bt.indexOf("steals")>=0;
 }
-var espnScheduled={};  // key = "teamA_teamB" or espn event id -> {tm,tv,d,isFinal,isLive,winner,homeScore,awayScore}
+var espnScheduled={};  // key
+// Manual overrides for games ESPN is returning bad data for
+espnScheduled['texasam_houston']={homeTeam:'Houston',awayTeam:'Texas AM',tm:'3/21 6:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
+espnScheduled['houston_texasam']={homeTeam:'Houston',awayTeam:'Texas AM',tm:'3/21 6:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 var scoreFetchInterval=null;
 
 function saveToStorage(){
@@ -830,9 +833,12 @@ function fetchScores(){
         var key=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
         var hs=parseInt(eg.homeScore)||0;var as=parseInt(eg.awayScore)||0;
         var hasRealScore=(hs+as)>10;
+        // Don't overwrite manual entries where ESPN has bad isFinal data
+        var existing=espnScheduled[key];
+        if(existing&&existing.manualOverride) continue;
         espnScheduled[key]={
           homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
-          tm:eg.statusText||'',tv:'',d:'',
+          tm:(eg.statusText&&eg.statusText!=='Final'&&eg.statusText.indexOf('Preview')<0)?eg.statusText:'',tv:'',d:'',
           isFinal:eg.isFinal&&hasRealScore,
           isLive:eg.isLive&&hasScore,
           winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
