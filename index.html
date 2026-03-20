@@ -506,7 +506,7 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t1d=t1strike?'<span style="opacity:0.38;text-decoration:line-through">'+t1+'</span>':t1;
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
 
-  // Bets assigned to this slot via espnScheduled key
+  // Bets assigned to this R32 slot via espnScheduled key
   var slotBets=[];
   if(eg){
     var k1=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
@@ -642,29 +642,31 @@ function buildCenterColumn(){
 }
 
 function findEspnScheduled(t1,t2){
-  // t1 and t2 are abbreviated names from our bracket
-  // We need to find the ESPN game matching these teams
-  // CRITICAL: only mark as final/live if scores are real non-zero numbers
-  // This prevents ESPN pre-seeded future games from showing as final
+  // Require BOTH teams to match - check home matches one and away matches other
+  // This prevents partial matches like Michigan matching Michigan State
+  var best=null;
   for(var k in espnScheduled){
     var eg=espnScheduled[k];
     if(!eg.homeTeam||!eg.awayTeam) continue;
-    if((teamNamesMatch(eg.homeTeam,t1)||teamNamesMatch(eg.awayTeam,t1))&&
-       (teamNamesMatch(eg.homeTeam,t2)||teamNamesMatch(eg.awayTeam,t2))){
-      var hs=parseInt(eg.homeScore)||0;
-      var as=parseInt(eg.awayScore)||0;
-      var hasRealScore=(hs+as)>10; // real game has meaningful combined score
-      return {
-        homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
-        tm:eg.tm,tv:eg.tv,d:eg.d,
-        isFinal:eg.isFinal&&hasRealScore,
-        isLive:eg.isLive&&(hs>0||as>0),
-        winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
-        homeScore:eg.homeScore,awayScore:eg.awayScore
-      };
-    }
+    // Strict: home matches t1 AND away matches t2, OR home matches t2 AND away matches t1
+    var m1=(teamNamesMatch(eg.homeTeam,t1)&&teamNamesMatch(eg.awayTeam,t2));
+    var m2=(teamNamesMatch(eg.homeTeam,t2)&&teamNamesMatch(eg.awayTeam,t1));
+    if(!m1&&!m2) continue;
+    var hs=parseInt(eg.homeScore)||0;
+    var as=parseInt(eg.awayScore)||0;
+    var hasRealScore=(hs+as)>10;
+    var result={
+      homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
+      tm:eg.tm,tv:eg.tv,d:eg.d,
+      isFinal:eg.isFinal&&hasRealScore,
+      isLive:eg.isLive&&(hs>0||as>0),
+      winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
+      homeScore:eg.homeScore,awayScore:eg.awayScore
+    };
+    // Prefer entries with actual time info
+    if(!best||result.tm) best=result;
   }
-  return null;
+  return best;
 }
 
 function buildRegion(reg,rev){
