@@ -192,8 +192,19 @@ for(var i=0;i<laterRounds.length;i++) flat.push(laterRounds[i]);
 
 // Map game day abbreviations to real 2026 dates
 var GAME_DATES={
-  "Thu":"2026-03-19", // Thursday March 19 (games start Mar 19)
-  "Fri":"2026-03-20"  // Friday March 20
+  "Thu":"2026-03-19",
+  "Fri":"2026-03-20",
+  "Sat":"2026-03-22",
+  "Sun":"2026-03-23"
+};
+// Earliest date each round can be final
+var ROUND_EARLIEST_FINAL={
+  "R64": new Date("2026-03-19T00:00:00-04:00").getTime(),
+  "R32": new Date("2026-03-22T00:00:00-04:00").getTime(),
+  "S16": new Date("2026-03-27T00:00:00-04:00").getTime(),
+  "E8":  new Date("2026-03-29T00:00:00-04:00").getTime(),
+  "F4":  new Date("2026-04-05T00:00:00-04:00").getTime(),
+  "Championship": new Date("2026-04-07T00:00:00-04:00").getTime()
 };
 
 // Build a real timestamp for each R64 game (tip time + 3 hours = grade time)
@@ -394,8 +405,18 @@ function gameCard(g){
     drawer+='</div>';
   }
   return '<div class="'+(isExpanded?"gm hb":""+cls)+'" onclick="showGameModal(\"'  +g.id+'\")" style="cursor:pointer">'
-    +'<div class="tr"><span class="sd">('+ g.s1+')</span><span class="tn'+(info.hasBet?" bt":"")+'">'+t1disp+plBadge+'</span>'+statusBadge+scoreStr+'</div>'
-    +'<div class="tr"><span class="sd">('+ g.s2+')</span><span class="tn">'+t2disp+'</span><span class="tm-t">'+g.d+' '+g.tm+' '+g.tv+'</span></div>'
+    +'<div class="tr">'
+    +'<span class="sd">('+ g.s1+')</span>'
+    +'<span class="tn'+(info.hasBet?" bt":"")+'">'+t1disp+plBadge+'</span>'
+    +(statusBadge?'<span style="margin-left:auto">'+statusBadge+'</span>':'')
+    +'</div>'
+    +'<div class="tr">'
+    +'<span class="sd">('+ g.s2+')</span>'
+    +'<span class="tn">'+t2disp+'</span>'
+    +(gr&&gr.isFinal
+      ?'<span style="font-size:9px;color:#94a3b8;margin-left:auto">'+abbr(gr.awayTeam)+' '+gr.awayScore+'-'+gr.homeScore+' '+abbr(gr.homeTeam)+'</span>'
+      :'<span class="tm-t" style="margin-left:auto">'+g.d+' '+g.tm+' '+g.tv+'</span>')
+    +'</div>'
     +pendingStrip+drawer+badge+'</div>';
 }
 
@@ -427,7 +448,8 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t1=w1?abbr(w1):'TBD';
   var t2=w2?abbr(w2):'TBD';
   // Only use ESPN game data if BOTH teams have advanced AND game date has passed
-  var gr=(w1&&w2&&espnSched&&espnSched.isFinal)?espnSched:null;
+  var roundOk=ROUND_EARLIEST_FINAL['R32']?Date.now()>ROUND_EARLIEST_FINAL['R32']:false;
+  var gr=(w1&&w2&&espnSched&&espnSched.isFinal&&roundOk)?espnSched:null;
   var statusBadge="";var timeInfo="";
   if(gr&&gr.isFinal) statusBadge='<span class="gm-final">FINAL</span>';
   else if(espnSched&&espnSched.isLive&&w1&&w2) statusBadge='<span class="gm-live">LIVE</span>';
@@ -611,7 +633,8 @@ function buildRegion(reg,rev){
       var sbadge='';var stimeInfo='';
       if(ssched&&ssched.tm) stimeInfo='<span class="tm-t">'+ssched.d+' '+ssched.tm+' '+ssched.tv+'</span>';
       else if(sw1&&sw2) stimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
-      if(ssched&&ssched.isFinal&&sw1&&sw2) sbadge='<span class="gm-final">FINAL</span>';
+      var s16ok=Date.now()>ROUND_EARLIEST_FINAL['S16'];
+      if(ssched&&ssched.isFinal&&sw1&&sw2&&s16ok) sbadge='<span class="gm-final">FINAL</span>';
       else if(ssched&&ssched.isLive&&sw1&&sw2) sbadge='<span class="gm-live">LIVE</span>';
       r3+='<div class="gm">'
         +'<div class="tr"><span class="tn'+(sw1?' bt':'')+'">'+st1+'</span>'+sbadge+'</div>'
@@ -635,7 +658,8 @@ function buildRegion(reg,rev){
     var ebadge='';var etimeInfo='';
     if(esched&&esched.tm) etimeInfo='<span class="tm-t">'+esched.d+' '+esched.tm+' '+esched.tv+'</span>';
     else if(e1&&e2) etimeInfo='<span style="font-size:9px;color:#475569">Time TBD</span>';
-    if(esched&&esched.isFinal&&e1&&e2) ebadge='<span class="gm-final">FINAL</span>';
+    var e8ok=Date.now()>ROUND_EARLIEST_FINAL['E8'];
+    if(esched&&esched.isFinal&&e1&&e2&&e8ok) ebadge='<span class="gm-final">FINAL</span>';
     else if(esched&&esched.isLive&&e1&&e2) ebadge='<span class="gm-live">LIVE</span>';
     r4='<div class="gm">'
       +'<div class="tr"><span class="tn'+(e1?' bt':'')+'">'+et1+'</span>'+ebadge+'</div>'
@@ -659,9 +683,25 @@ function teamNamesMatch(espnName, ourName){
   var a=espnName.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
   var b=ourName.toLowerCase().replace(/[^a-z0-9 ]/g,'').trim();
   if(a===b) return true;
-  // Exact substring match first
   if(a.indexOf(b)>=0||b.indexOf(a)>=0) return true;
-  // Fuzzy word match — skip generic words that appear in many team names
+  // Nickname mappings for teams ESPN uses full names for
+  var nicknames={
+    'unc':'north carolina','north carolina':'unc',
+    'ucf':'central florida','central florida':'ucf',
+    'uconn':'connecticut','connecticut':'uconn',
+    'vcu':'virginia commonwealth',
+    'byu':'brigham young','brigham young':'byu',
+    'liu':'long island','long island':'liu',
+    'smu':'southern methodist',
+    'tcu':'texas christian','texas christian':'tcu',
+    'unlv':'nevada las vegas',
+    'utep':'texas el paso',
+    'pv':'prairie view','prairie':'pv',
+    'smg':'saint marys','saint marys':'smg',
+    'ndsu':'north dakota','nist':'north dakota'
+  };
+  if(nicknames[b]&&a.indexOf(nicknames[b])>=0) return true;
+  if(nicknames[a]&&b.indexOf(nicknames[a])>=0) return true;
   var skip={state:1,university:1,north:1,south:1,east:1,west:1,point:1,tech:1,college:1,the:1,and:1,northern:1,southern:1,eastern:1,western:1,central:1,national:1,saint:1,mount:1};
   var aw=a.split(' ');var bw=b.split(' ');
   for(var i=0;i<aw.length;i++){
