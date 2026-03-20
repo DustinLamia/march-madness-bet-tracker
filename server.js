@@ -4,7 +4,11 @@ const cors = require('cors');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-app.use(cors());
+app.use(cors({
+  origin: ['https://marchmadnessbettracker.com', 'https://www.marchmadnessbettracker.com', 'https://dustinlamia.github.io', 'http://localhost:3000'],
+  methods: ['GET', 'POST'],
+  allowedHeaders: ['Content-Type']
+}));
 app.use(express.json({ limit: '10mb' }));
 
 app.get('/', (req, res) => {
@@ -16,15 +20,20 @@ app.get('/api/scores', async (req, res) => {
   try {
     // Fetch all tournament dates - R64 is Mar 19-20, R32 is Mar 21-22, etc.
     const dates = ['20260319','20260320','20260321','20260322','20260327','20260328','20260329','20260330','20260405','20260407'];
-    const allEvents = [];
-    for (const date of dates) {
+    // Fetch all dates in parallel with 5s timeout each
+    const fetchDate = async (date) => {
       try {
         const url = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=100&limit=64&dates=${date}`;
-        const response = await fetch(url);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch(url, { signal: controller.signal });
+        clearTimeout(timeout);
         const data = await response.json();
-        if (data.events) allEvents.push(...data.events);
-      } catch(e) { /* skip failed dates */ }
-    }
+        return data.events || [];
+      } catch(e) { return []; }
+    };
+    const results = await Promise.all(dates.map(fetchDate));
+    const allEvents = results.flat();
     // Deduplicate by event id
     const seen = new Set();
     const unique = allEvents.filter(e => { if(seen.has(e.id)) return false; seen.add(e.id); return true; });
