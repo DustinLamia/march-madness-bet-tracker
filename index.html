@@ -517,17 +517,26 @@ function buildCenterColumn(){
 }
 
 function findEspnScheduled(t1,t2){
+  // t1 and t2 are abbreviated names from our bracket
+  // We need to find the ESPN game matching these teams
+  // CRITICAL: only mark as final/live if scores are real non-zero numbers
+  // This prevents ESPN pre-seeded future games from showing as final
   for(var k in espnScheduled){
     var eg=espnScheduled[k];
     if(!eg.homeTeam||!eg.awayTeam) continue;
     if((teamNamesMatch(eg.homeTeam,t1)||teamNamesMatch(eg.awayTeam,t1))&&
        (teamNamesMatch(eg.homeTeam,t2)||teamNamesMatch(eg.awayTeam,t2))){
-      // Never return a winner unless the game is truly final with real scores
-      var safe=JSON.parse(JSON.stringify(eg));
-      if(!safe.isFinal||(parseInt(safe.homeScore)||0)===0&&(parseInt(safe.awayScore)||0)===0){
-        safe.winner=null;
-      }
-      return safe;
+      var hs=parseInt(eg.homeScore)||0;
+      var as=parseInt(eg.awayScore)||0;
+      var hasRealScore=(hs+as)>10; // real game has meaningful combined score
+      return {
+        homeTeam:eg.homeTeam,awayTeam:eg.awayTeam,
+        tm:eg.tm,tv:eg.tv,d:eg.d,
+        isFinal:eg.isFinal&&hasRealScore,
+        isLive:eg.isLive&&(hs>0||as>0),
+        winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
+        homeScore:eg.homeScore,awayScore:eg.awayScore
+      };
     }
   }
   return null;
@@ -1028,7 +1037,6 @@ function draw(){
           btns='<div style="display:flex;justify-content:space-between;align-items:center;margin-top:6px">'
             +'<span style="font-weight:700;font-size:14px;color:'+xc+'">'+( bp>=0?"+":"")+'$'+Math.abs(bp).toFixed(2)+gradedBy+'</span>'
             +'<div style="display:flex;gap:5px">'
-            +'<button class="rbt" data-r="undo" data-b="'+b.id+'" data-type="straight" style="background:#1e293b;flex:0;padding:4px 8px;font-size:10px">Undo Grade</button>'
             +'<button onclick="deleteBet(this.getAttribute(\'data-id\'),\'straight\')" class="rbt" style="background:#450a0a;color:#ef4444;flex:0;padding:4px 8px;font-size:10px" data-id='+b.id+'>Delete</button>'
             +'</div></div>';
         }
