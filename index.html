@@ -271,6 +271,8 @@ function isPropBet(b){
 }
 var espnScheduled={};  // key
 // Manual overrides for games ESPN is returning bad data for
+espnScheduled['saintlouis_michigan']={homeTeam:'Michigan',awayTeam:'Saint Louis',tm:'3/21 12:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
+espnScheduled['michigan_saintlouis']={homeTeam:'Michigan',awayTeam:'Saint Louis',tm:'3/21 12:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 espnScheduled['texas_gonzaga']={homeTeam:'Gonzaga',awayTeam:'Texas',tm:'3/21 7:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 espnScheduled['gonzaga_texas']={homeTeam:'Gonzaga',awayTeam:'Texas',tm:'3/21 7:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
 espnScheduled['texasam_houston']={homeTeam:'Houston',awayTeam:'Texas AM',tm:'3/21 6:10 PM ET CBS',tv:'CBS',d:'Sat',isFinal:false,isLive:false,winner:null,homeScore:'',awayScore:'',manualOverride:true};
@@ -336,7 +338,8 @@ function matchBet(b){
       }
     }
   }
-  // Single team fallback — only use if no opponent info at all
+  // Single team fallback — ONLY if no opponent info at all
+  // If we have an opponent but found no match, return null rather than wrong game
   if(!opp){
     var t=((b.game||"")+" "+(b.team||"")).toLowerCase();
     for(var i=0;i<flat.length;i++){
@@ -345,6 +348,7 @@ function matchBet(b){
       for(var j=0;j<ps.length;j++){if(ps[j].length>3&&!{state:1,university:1,north:1,south:1}[ps[j]]&&t.indexOf(ps[j])>=0) return g.id;}
     }
   }
+  // If we had an opponent but no match found, return null — better unmatched than wrong
   return null;
 }
 
@@ -385,7 +389,7 @@ function gameCard(g){
   for(var i=0;i<straightBets.length;i++){if(straightBets[i].assignedGame===g.id) betsForGame.push(straightBets[i]);}
   var br=betsForGame.length>0?betsForGame[0].result:null;
   var badge="";
-  if(br){var bc=br==="win"?"#059669":br==="loss"?"#dc2626":"#d97706";badge='<div class="rb" style="background:'+bc+'">'+br.charAt(0).toUpperCase()+'</div>';}
+  var badge='';
   var gr=gameResults[g.id];
   var statusBadge="";var scoreStr="";
   if(gr&&gr.isFinal){statusBadge='<span class="gm-final">FINAL</span>';scoreStr='<span class="gm-score">'+abbr(gr.awayTeam)+' '+gr.awayScore+' - '+gr.homeScore+' '+abbr(gr.homeTeam)+'</span>';}
