@@ -845,13 +845,18 @@ function applyScores(games){
     var gradeTime=getGradeTime(flatGame);
     if(!gradeTime) continue;
     if(now<=gradeTime) continue; // not enough time has passed
-    if(!eg.winner) continue; // no winner from ESPN yet
     if(!hasScore) continue; // no real score data
+    // If ESPN hasn't set winner but we have scores and time has passed, compute winner ourselves
+    var winner=eg.winner;
+    if(!winner&&hs>0&&as2>0){
+      winner=hs>as2?eg.homeTeam:eg.awayTeam;
+    }
+    if(!winner) continue;
 
     // Confirmed — set final, advance bracket, grade bets
     gameResults[gid].isFinal=true;
-    gameResults[gid].winner=eg.winner;
-    if(!bracketWinners[gid]) bracketWinners[gid]=eg.winner;
+    gameResults[gid].winner=winner;
+    if(!bracketWinners[gid]){bracketWinners[gid]=winner;saveToStorage();}
 
     for(var j=0;j<straightBets.length;j++){
       var b=straightBets[j];
@@ -862,9 +867,9 @@ function applyScores(games){
         result=gradeTotal(b.betType,eg.homeScore,eg.awayScore);
       }else if(bt.indexOf("spread")>=0||extractNumber(b.betType)!==null){
         result=gradeSpread(b.betType,b.team,eg.homeTeam,eg.awayTeam,eg.homeScore,eg.awayScore);
-        if(!result) result=teamNamesMatch(eg.winner,b.team)?"win":"loss";
+        if(!result) result=teamNamesMatch(winner,b.team)?"win":"loss";
       }else{
-        result=teamNamesMatch(eg.winner,b.team)?"win":"loss";
+        result=teamNamesMatch(winner,b.team)?"win":"loss";
       }
       if(result){b.result=result;b.autoGraded=true;newGrades++;saveToStorage();autoGradeLog.push({team:b.team,result:b.result,game:gid});}
     }
@@ -898,7 +903,11 @@ function fetchScores(){
       }
       // applyScores handles gameResults + bracketWinners + bet grading
       // using time-based logic only
+      console.log('ESPN returned', data.games.length, 'games');
+      var sample=data.games.slice(0,3).map(function(g){return g.homeTeam+' vs '+g.awayTeam+' final='+g.isFinal+' score='+g.homeScore+'-'+g.awayScore;});
+      console.log('Sample:', sample);
       var graded=applyScores(data.games);
+      console.log('Graded:', graded, 'winners:', Object.keys(bracketWinners).length);
       lastScoreFetch=Date.now();
       if(graded>0) saveToStorage();
       if(graded>0||Object.keys(gameResults).length>0) draw();
@@ -1498,8 +1507,8 @@ function doUpload(files){
 }
 
 loadFromStorage();
-startScorePolling();
-draw();
+draw(); // draw immediately with cached data
+startScorePolling(); // then start polling for updates
 </script>
 </body>
 </html>
