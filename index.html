@@ -472,6 +472,7 @@ function connSvg(rev){
 function liveSlot(g1id,g2id,round,espnSched){
   var w1=bracketWinners[g1id]||null;
   var w2=bracketWinners[g2id]||null;
+  console.log("liveSlot called:",g1id,"w1:",w1,g2id,"w2:",w2);
   if(!w1&&!w2) return slot(round);
   var t1=w1?abbr(w1):'TBD';
   var t2=w2?abbr(w2):'TBD';
@@ -507,7 +508,6 @@ function liveSlot(g1id,g2id,round,espnSched){
   var t2d=t2strike?'<span style="opacity:0.38;text-decoration:line-through">'+t2+'</span>':t2;
 
   // Bets assigned to this R32 slot via espnScheduled key
-  console.log("liveSlot eg:",eg&&eg.homeTeam,eg&&eg.awayTeam,"k1/k2:",eg?(eg.homeTeam+"_"+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,""):"null");
   var slotBets=[];
   if(eg){
     var k1=(eg.homeTeam+'_'+eg.awayTeam).toLowerCase().replace(/[^a-z0-9_]/g,'');
@@ -682,7 +682,6 @@ function buildRegion(reg,rev){
   for(var i=0;i<4;i++){
     var w1=bracketWinners[g[i*2].id]||null;
     var w2=bracketWinners[g[i*2+1].id]||null;
-    console.log("R32 slot",i,"g1:",g[i*2].id,"w1:",w1,"g2:",g[i*2+1].id,"w2:",w2);
     var sched=w1&&w2?findEspnScheduled(w1,w2):null;
     r2+=liveSlot(g[i*2].id,g[i*2+1].id,'Round of 32',sched);
     c1+=connSvg(rev);
@@ -933,12 +932,10 @@ function fetchScores(){
       }
       // applyScores handles gameResults + bracketWinners + bet grading
       // using time-based logic only
-      console.log('ESPN returned', data.games.length, 'games');
-      var sample=data.games.slice(0,3).map(function(g){return g.homeTeam+' vs '+g.awayTeam+' final='+g.isFinal+' score='+g.homeScore+'-'+g.awayScore;});
-      console.log('Sample:', sample);
-      var graded=applyScores(data.games);
-      console.log('Graded:', graded, 'winners:', Object.keys(bracketWinners).length);
-      lastScoreFetch=Date.now();
+          var sample=data.games.slice(0,3).map(function(g){return g.homeTeam+' vs '+g.awayTeam+' final='+g.isFinal+' score='+g.homeScore+'-'+g.awayScore;});
+          var graded=applyScores(data.games);
+          console.log('winners:',JSON.stringify(bracketWinners));
+          lastScoreFetch=Date.now();
       if(graded>0) saveToStorage();
       if(graded>0||Object.keys(gameResults).length>0) draw();
     })
