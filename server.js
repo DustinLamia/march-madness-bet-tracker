@@ -11,14 +11,25 @@ app.get('/', (req, res) => {
   res.json({ status: 'ok', service: 'March Madness Bet Tracker API' });
 });
 
-// ESPN scores route — polls NCAA tournament scoreboard
+// ESPN scores route — fetches ALL tournament dates
 app.get('/api/scores', async (req, res) => {
   try {
-    const url = 'https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=100&limit=64';
-    const response = await fetch(url);
-    const data = await response.json();
+    // Fetch all tournament dates - R64 is Mar 19-20, R32 is Mar 21-22, etc.
+    const dates = ['20260319','20260320','20260321','20260322','20260327','20260328','20260329','20260330','20260405','20260407'];
+    const allEvents = [];
+    for (const date of dates) {
+      try {
+        const url = `https://site.api.espn.com/apis/site/v2/sports/basketball/mens-college-basketball/scoreboard?groups=100&limit=64&dates=${date}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        if (data.events) allEvents.push(...data.events);
+      } catch(e) { /* skip failed dates */ }
+    }
+    // Deduplicate by event id
+    const seen = new Set();
+    const unique = allEvents.filter(e => { if(seen.has(e.id)) return false; seen.add(e.id); return true; });
 
-    const games = (data.events || []).map(event => {
+    const games = unique.map(event => {
       const comp = event.competitions[0];
       const status = comp.status;
       const teams = comp.competitors;
@@ -51,7 +62,7 @@ app.get('/api/scores', async (req, res) => {
       };
     });
 
-    res.json({ games });
+    res.json({ games, total: games.length });
   } catch (err) {
     console.error('ESPN fetch error:', err);
     res.status(500).json({ error: 'Failed to fetch scores from ESPN' });
