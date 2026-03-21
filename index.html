@@ -937,7 +937,8 @@ function fetchScores(){
           isFinal:eg.isFinal&&hasRealScore,
           isLive:eg.isLive&&(hs>0||as>0),
           winner:eg.isFinal&&hasRealScore&&eg.winner?eg.winner:null,
-          homeScore:eg.homeScore,awayScore:eg.awayScore
+          homeScore:eg.homeScore,awayScore:eg.awayScore,
+          round:eg.round||''
         };
       }
       // applyScores handles gameResults + bracketWinners + bet grading
@@ -962,7 +963,36 @@ function getRoundStats(){
   for(var i=0;i<straightBets.length;i++){
     var b=straightBets[i];
     var g=null;for(var j=0;j<flat.length;j++){if(flat[j].id===b.assignedGame){g=flat[j];break;}}
-    var rk=g?g.round:"R64";
+    var rk="R64";
+    if(g){
+      rk=g.round;
+    } else if(b.assignedGame){
+      // Check if assignedGame is an espnScheduled key (R32+ bet)
+      var ag=b.assignedGame;
+      var esg=espnScheduled[ag];
+      if(esg&&esg.round) rk=esg.round;
+      else if(ag.indexOf('r32')>=0||ag.indexOf('round32')>=0) rk='R32';
+      // Detect by checking if the key matches any known R32 espnScheduled entries
+      // R32 entries are manually seeded or from ESPN R32 data
+      else {
+        // Check espnScheduled for this key and look at the round field
+        for(var ek in espnScheduled){
+          if(ek===ag){
+            var er=espnScheduled[ek].round||'';
+            if(er.indexOf('2nd Round')>=0||er.indexOf('Round of 32')>=0) rk='R32';
+            else if(er.indexOf('Sweet 16')>=0) rk='S16';
+            else if(er.indexOf('Elite')>=0) rk='E8';
+            else if(er.indexOf('Final Four')>=0) rk='F4';
+            else if(er.indexOf('Championship')>=0) rk='Championship';
+            break;
+          }
+        }
+        // If still R64 but key doesnt match any flat R64 id, it must be R32+
+        // Check if any known R32 manual keys match
+        var r32keys=['saintlouis_michigan','michigan_saintlouis','texas_gonzaga','gonzaga_texas','texasam_houston','houston_texasam','michigan_saintlouis'];
+        for(var rk2i=0;rk2i<r32keys.length;rk2i++){if(r32keys[rk2i]===ag){rk='R32';break;}}
+      }
+    }
     if(!rounds[rk]) continue;
     rounds[rk].bets++;rounds[rk].st+=b.stake||0;
     if(b.result==="win"){rounds[rk].wi++;rounds[rk].pl+=(b.potentialPayout||0)-(b.stake||0);}
